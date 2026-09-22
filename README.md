@@ -7,11 +7,12 @@
 ## Install
 
 ```bash
-# From a local clone:
-claude plugin install /path/to/seatbelt
-
-# Or add this repo as a marketplace source, then install from it:
+# Add this repo as a marketplace source, then install the plugin by name:
 claude plugin marketplace add dripston/seatbelt
+claude plugin install seatbelt
+
+# Testing from a local clone instead of GitHub (must start with ./ or be absolute):
+claude plugin marketplace add ./path/to/local/seatbelt
 claude plugin install seatbelt
 ```
 
@@ -63,7 +64,7 @@ Full evidence log with verification notes: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 ## Contributing
 
-Issues and PRs welcome. Run `node --test tests/` for unit tests and `node evals/run-evals.js` for integration evals before submitting.
+Issues and PRs welcome. Run `node --test tests/*.test.js` for unit tests and `node evals/run-evals.js` for integration evals before submitting.
 
 ## License
 
