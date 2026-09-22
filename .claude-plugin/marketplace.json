@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace-manifest.json",
+  "name": "seatbelt-marketplace",
+  "description": "Marketplace for the seatbelt (rule-guard) plugin: stops Claude Code agents from breaking critical project rules after compaction or via risky shell commands.",
+  "owner": {
+    "name": "dripston"
+  },
+  "plugins": [
+    {
+      "name": "seatbelt",
+      "source": "./",
+      "displayName": "Seatbelt (rule-guard)",
+      "description": "Stops Claude Code agents from breaking critical project rules after context compaction or via risky shell commands.",
+      "version": "0.1.0",
+      "category": "safety",
+      "keywords": ["rules", "guard", "hooks", "safety", "claude-md", "agents-md"]
+    }
+  ]
+}
