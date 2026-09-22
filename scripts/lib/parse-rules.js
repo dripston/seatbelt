@@ -91,6 +91,9 @@ function guardPatternToRegExp(pattern) {
   const escaped = pattern
     .split('*')
     .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    // Collapse runs of literal whitespace into \s+ so "git push" still
+    // matches "git  push" (double space) or other incidental spacing.
+    .map((part) => part.replace(/\s+/g, '\\s+'))
     .join('.*');
   return new RegExp(escaped, 'i');
 }
