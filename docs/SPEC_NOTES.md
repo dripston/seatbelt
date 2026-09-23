@@ -127,3 +127,14 @@ Validation command (documented): `claude plugin validate .` — will run this in
 ## Version-gating caveat
 
 Docs note several fields/behaviors are version-gated (e.g. features requiring v2.1.196+, v2.1.218+, v2.1.246+, v2.1.257+). We are not pinning to a specific Claude Code version in this build; if a validation step reveals a version mismatch, it will be logged in PROGRESS.md rather than silently worked around.
+
+## Hook process model (checked during fix-pass Phase 4, latency investigation)
+
+Source: https://code.claude.com/docs/en/hooks and https://code.claude.com/docs/en/hooks-guide
+
+- **No warm/daemon/persistent process model is documented for `command`-type hooks.** Each invocation spawns a fresh process; this is stated implicitly by the mechanism's description ("Command hooks communicate through stdout, stderr, and exit codes only") with no mention of process reuse, socket-based hooks, or a daemon mode anywhere in the reference or guide.
+- **`http` hooks** POST to an already-running server (avoids a local process spawn by Claude Code, but requires the user to run and maintain that server themselves).
+- **`mcp_tool` hooks** call a tool on an "already-connected" MCP server — the docs explicitly note "the hook never triggers an OAuth or connection flow," confirming this reuses a persistent connection rather than spawning fresh. This is the only documented pattern resembling a warm process for hook logic, but it requires standing up an MCP server, which is a materially different architecture than a `command` hook script.
+- **No documented latency/performance guidance for `command` hooks.** The only overhead-related mitigation mentioned anywhere is narrowing a hook's `matcher`/`if` condition so it only spawns for tool calls it actually cares about — this reduces how often a hook spawns, not how expensive each spawn is. No guidance on compiled binaries vs. Node, or any other spawn-cost-reduction technique, was found.
+
+Implication: this plugin's `command`-type hooks (as specified in hooks/hooks.json) cannot avoid a fresh Node process spawn per Bash tool call given the currently-documented hook system. See evals/results/LATENCY_BREAKDOWN.md for the measured cost of that spawn versus this plugin's own code.
