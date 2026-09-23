@@ -41,12 +41,18 @@ Rules with a `[guard: pattern]` tag are checked against every Bash command befor
 - **`SessionStart` hook**: on `compact` or `resume`, re-reads your critical block and re-injects it as context, so rules don't quietly fall out of the model's effective attention after a summary.
 - Both hooks fail open: if parsing crashes or a file is malformed, the hook logs to stderr and allows the action rather than bricking your session, and warns you if a CLAUDE.md/AGENTS.md file exists but no rule block was recognized in it.
 
-## Measured accuracy (not a guess — see evals/results/VERDICT-2.md for the full methodology)
+## Measured accuracy (not a guess — see evals/results/VERDICT-2.md and evals/results/HOLDOUT_REPORT.md for the full methodology)
 
-Tested against a 518-row dataset (real commands from actual shell history plus hand-labeled synthetic and adversarial cases, labeled independently of the implementation):
+**Two different numbers exist for dangerous-command recall, and they say different things — both are published here, labeled, not just the better one:**
 
-- **Dangerous-command recall: 99.1%** (107/108) — catches the git/publish/infra/system/filesystem-destructive actions it's built for.
-- **False positives on safe, everyday commands: 0.0%** (0/218) — won't nag you during ordinary work.
+- **99.1%** (107/108) against the 518-row training-adjacent dataset — this measures how well the built-in risky-command list covers the *specific commands* it was built and tuned against.
+- **12.0%** (3/25) against a held-out set of 40 commands using genuinely different tools and syntax not seen while building the list (different package managers — poetry, dotnet nuget, composer, helm; different clouds — DigitalOcean, Linode; different databases — Redis, MongoDB, Cassandra, InfluxDB; different system tools — poweroff, pkill, usermod, wipefs, rclone, gsutil, rsync). This measures actual generalization to the categories the tool claims to cover (git history/remote mutation, package publish/release, infra destroy, system operations, filesystem destruction).
+
+**The honest read: the built-in risky-command list recognizes specific tools it has already seen, not the general categories it's named after.** If you use `git`, `npm`/`yarn`/`pnpm`/`cargo`/`twine`/`gem`/`docker push`, `terraform`/`kubectl`/`aws`/`gcloud`/`az`, or the specific system/filesystem commands already in `scripts/risky-commands.js`, the 99.1% figure is the relevant one. If your workflow uses a different package manager, cloud provider, database, or system tool than what's already listed, assume it is **not** covered until you check the list yourself or add your own guard rule for it — the 12.0% figure is the relevant one for anything outside the specifically-enumerated set. Full breakdown, every failing command, and why: [evals/results/HOLDOUT_REPORT.md](evals/results/HOLDOUT_REPORT.md).
+
+Other measured numbers (against the 518-row training-adjacent dataset; these were not separately re-tested on held-out data in this pass):
+
+- **False positives on safe, everyday commands: 0.0%** (0/218) — won't nag you during ordinary work. The near-miss/context-aware-matching mechanism behind this (distinguishing a real invocation from a comment/quote/read-only-command argument) generalized much better than the risky-command list did — 86.7% correct on the held-out near-miss set vs. 91.1% on the training-adjacent set, a small and expected drop, not a collapse.
 - **Precision when it hard-denies something: 100.0%** — a `deny` from seatbelt can be trusted; it only refuses outright what you explicitly told it to refuse via a guard rule.
 - **Latency: adds roughly 90-180ms to every Bash command** (p50 ~90-110ms, p95 ~110-180ms depending on system load). Measured directly: an empty Node.js process alone costs ~78-94ms on a typical machine — that's Claude Code's `command`-hook model spawning a fresh process per invocation, with no warm/persistent alternative currently documented. This plugin's own logic adds roughly 11-14ms on top. This is a real, felt delay on every command, not a one-time cost — worth knowing before you install.
 
