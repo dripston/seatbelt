@@ -28,7 +28,21 @@ Per-signal firing table (measured against main dataset + burned holdout, 558 row
 
 Safe FPR stayed at or under target (0.0% final, briefly 1.8% mid-fix before the above bugs were fixed) — never needed the "tighten before Phase 3" escalation the plan describes, since each false positive was fixed as found.
 
-### Next: Phase 3 (second holdout, built blind) and Phase 4 (VERDICT-3.md) — not yet done as of this update.
+### Structural rewrite: Phase 3 (second holdout, built blind)
+
+Wrote `evals/dataset/holdout2.jsonl` (25 dangerous + 15 near-miss, 40 rows) BEFORE running anything and without re-reading `structural-danger.js`/`risky-commands.js` post-rewrite, per the plan's rule. Reached further than the first holdout per the plan's explicit instruction: Homebrew, Nix, apk, pacman (4 package managers never seen before), diskutil/tmutil (macOS-native), PowerShell cmdlets and native Windows CLIs (`net`, `sc.exe`), 3 different hypervisors (Vagrant, virsh/libvirt, VirtualBox), Nomad/Consul (non-Kubernetes orchestration), docker-compose, CircleCI/fastlane (CI/mobile-deploy tools), gh/glab (platform CLIs), 3 different backup tools (Borg, Restic, Duplicity), Certbot, Vault. Overlap check against BOTH prior datasets written to `evals/results/HOLDOUT2_OVERLAP.md` — no rows required replacement.
+
+**Result: 75.0% overall (30/40), dangerous recall 60.0% (15/25), near-miss 100.0% (15/15).** This is the honest, blind number — a 5x improvement over the original enumeration approach's 12.0%, but a real, substantial gap remains (39.1 points below the training-adjacent set's 99.1%).
+
+Diagnosed every one of the 10 dangerous-bucket misses down to a specific, understood cause (not vague "didn't catch it" — see evals/results/VERDICT-3.md for the full table): incomplete destructive-verb vocabulary (nix-collect-garbage, restic forget), camelCase-fused verbs defeating word-boundary matching (diskutil eraseDisk, tmutil deletelocalsnapshots), non-POSIX flag conventions never parsed (PowerShell's fused verb-noun cmdlets, Windows' `/delete` flag syntax, fastlane's `key:value` syntax), bundled single-letter Unix flags (pacman's `-Rns`), and one direct, honest tradeoff (removing "uninstall" from the verb list to fix an earlier `npm uninstall` false positive also suppressed the genuinely riskier `brew uninstall --force`). None of these were fixed in this phase — measurement only, per the plan's rule.
+
+### Structural rewrite: Phase 4 (VERDICT-3.md + README rewrite)
+
+Wrote [evals/results/VERDICT-3.md](evals/results/VERDICT-3.md): full metric history across all 3 evals and both holdout tests, the generalization-gap calculation against the plan's pre-committed thresholds (under 10 points = works cleanly, over 20 = does not — actual gap is 39.1 points, past the "does not work cleanly" line but a 5x improvement over the pre-rewrite 87.1-point gap), the per-signal usefulness table, confirmation that safe FPR and deny precision survived the rewrite unchanged, and a plain verdict: conditionally ready, headline claim now anchored to 60% (the blind number), not 99.1% (the fitted one).
+
+Rewrote README's "Measured accuracy" section to lead with 60.0% as the headline claim, explicitly stating an earlier version said 99% and that was measuring something narrower. All three recall numbers (99.1% / 12.0% / 60.0%) are shown, labeled, with an explanation of what each one actually measures. Added a new "What this does NOT fix" bullet for the specific structural-detection blind spots (non-POSIX flag conventions, incomplete verb vocabulary, the uninstall tradeoff). Updated "How the accuracy numbers were produced" to link all three verdicts and both holdout overlap docs, and to be explicit about which datasets are "burned" (used to guide fixes) vs. genuinely blind.
+
+**This task's own generalization-gap threshold means the honest characterization is: real, substantial improvement (5x), not a solved problem.** Recorded as such in both VERDICT-3.md and the README, not rounded up in either direction.
 
 ## Prior status: VERDICT REVISED: the 99.1% dangerous-recall figure does not generalize
 
