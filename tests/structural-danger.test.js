@@ -11,52 +11,76 @@ const {
   matchesPublishShape,
   matchesIrreducible,
   evaluateStructuralDanger,
+  splitMorphology,
+  matchesFusedVerbPrefix,
+  matchesPowerShellVerbNoun,
+  verbFamily,
 } = require('../scripts/lib/structural-danger');
 
-// --- Signal A: destructive verb + target ---
+// --- Signal A: destructive verb + target + reversibility gate ---
+// Round 2: every call now passes headCommand as the second argument,
+// since matchesDestructiveVerbAndTarget consults the reversibility axis
+// (scripts/lib/assess-reversibility.js), which needs it for the
+// shared-account-CLI check. A destructive verb alone is no longer
+// sufficient — it must ALSO score high-consequence.
 
-test('A: flux delete kustomization x matches', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('flux delete kustomization production-apps').matched, true);
+test('A: flux delete kustomization x matches (shared-account CLI)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('flux delete kustomization production-apps', 'flux').matched, true);
 });
-test('A: doctl databases delete x matches', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('doctl databases delete prod-postgres-cluster').matched, true);
+test('A: doctl databases delete x matches (shared-account CLI)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('doctl databases delete prod-postgres-cluster', 'doctl').matched, true);
 });
-test('A: rclone purge remote:x matches', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('rclone purge remote:production-backups').matched, true);
+test('A: rclone purge remote:x matches (remote reach)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('rclone purge remote:production-backups', 'rclone').matched, true);
 });
-test('A: influx bucket delete x matches', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('influx bucket delete --name prod-metrics').matched, true);
+test('A: influx bucket delete x matches (prod target + action verb via reach)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('influx bucket delete --name prod-metrics', 'influx').matched, true);
 });
-test('A: git update-ref -d x matches (drop-like verb "rm" not needed, "delete" style word not present but -d... )', () => {
+test('A: git update-ref -d x does not match (drop-like verb "rm" not needed, "delete" style word not present but -d...)', () => {
   // git update-ref uses -d, not the word "delete" — this specific phrasing
   // is NOT expected to match signal A (no destructive-verb WORD present).
   // Documented here as a known miss for this signal alone; see if another
   // signal catches it in the combined evaluateStructuralDanger test below.
-  assert.equal(matchesDestructiveVerbAndTarget('git update-ref -d refs/heads/release-2.3').matched, false);
+  assert.equal(matchesDestructiveVerbAndTarget('git update-ref -d refs/heads/release-2.3', 'git').matched, false);
 });
-test('A: linode-cli linodes delete x matches', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('linode-cli linodes delete 12345678').matched, true);
+test('A: linode-cli linodes delete x matches (shared-account CLI)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('linode-cli linodes delete 12345678', 'linode-cli').matched, true);
 });
 test('A: kubectl delete namespace x matches (already-covered tool, still structurally valid)', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('kubectl delete namespace production').matched, true);
+  assert.equal(matchesDestructiveVerbAndTarget('kubectl delete namespace production', 'kubectl').matched, true);
 });
 test('A: does NOT match a bare verb with no target', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('git status').matched, false);
+  assert.equal(matchesDestructiveVerbAndTarget('git status', 'git').matched, false);
 });
 test('A: does NOT match "delete" appearing with nothing following it', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('echo delete').matched, false);
+  assert.equal(matchesDestructiveVerbAndTarget('echo delete', 'echo').matched, false);
 });
-test('A: does NOT match "npm uninstall left-pad" (uninstall deliberately excluded: routine, reversible package removal, not infra/data destruction)', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('npm uninstall left-pad').matched, false);
+test('A: does NOT match "npm uninstall left-pad" (project-local, re-derivable target -> low consequence via reversibility gate, not via removing the verb)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('npm uninstall left-pad', 'npm').matched, false);
+});
+test('A: round-2 fix — DOES match "brew uninstall --force x" (uninstall is back in the vocabulary; --force makes it high-consequence)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('brew uninstall --force postgresql@14', 'brew').matched, true);
 });
 test('A: does NOT match "git reset --help" (--help is not a real target)', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('git reset --help').matched, false);
+  assert.equal(matchesDestructiveVerbAndTarget('git reset --help', 'git').matched, false);
 });
 test('A: does NOT match "rm --help" (--help is not a real target)', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('rm --help').matched, false);
+  assert.equal(matchesDestructiveVerbAndTarget('rm --help', 'rm').matched, false);
 });
-test('A: does NOT match "rm important-file.txt" (bare rm with no -r/-f flag, low-risk, covered separately if ever needed)', () => {
-  assert.equal(matchesDestructiveVerbAndTarget('rm important-file.txt').matched, false);
+test('A: does NOT match "rm important-file.txt" (bare rm with no -r/-f flag, low-risk, project-local-looking target)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('rm important-file.txt', 'rm').matched, false);
+});
+test('A: round-2 — does NOT match "nix-collect-garbage -d" head command alone without a target word (documented: -d is not a word matched by the verb regex, this specific phrasing is a known remaining gap for signal A, covered instead by whichever signal fires for it, if any)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('nix-collect-garbage -d', 'nix-collect-garbage').matched, false);
+});
+test('A: round-2 — "collect-garbage" verb alone with an ambiguous target does NOT match (correct: reversibility gate requires a positive high-consequence signal, verb presence alone is not enough — this is the gate working as intended, not a gap)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('somecli collect-garbage --older-than 7d', 'somecli').matched, false);
+});
+test('A: round-2 — "collect-garbage" verb DOES match once a high-consequence signal is present (remote reach)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('somecli collect-garbage remote:store', 'somecli').matched, true);
+});
+test('A: round-2 — DOES match "forget" (separation family) with a suppressed-confirm flag', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('restic forget --prune --force', 'restic').matched, true);
 });
 
 // --- Signal B: destructive flags, any binary ---
@@ -67,8 +91,11 @@ test('B: --no-preserve-root matches', () => {
 test('B: git reset --hard matches', () => {
   assert.equal(matchesDestructiveFlags('git reset --hard HEAD~3', 'git').matched, true);
 });
-test('B: --prune with a covered tool name matches', () => {
+test('B: docker system prune -a --volumes matches via the generalized --all/-a + destructive-verb scope-widening check (round 2: no longer hardcodes docker/npm/git/helm)', () => {
   assert.equal(matchesDestructiveFlags('docker system prune -a --volumes', 'docker').matched, true);
+});
+test('B: round-2 — a bare --prune FLAG (not verb form) on any binary with a high-consequence target matches', () => {
+  assert.equal(matchesDestructiveFlags('sometool sync --prune remote:backups', 'sometool').matched, true);
 });
 test('B: kill -9 via pkill head matches', () => {
   assert.equal(matchesDestructiveFlags('pkill -9 -f postgres', 'pkill').matched, true);
@@ -333,4 +360,100 @@ test('combined: an ordinary safe command matches nothing', () => {
   assert.equal(evaluateStructuralDanger('npm run dev', 'npm'), null);
   assert.equal(evaluateStructuralDanger('git status', 'git'), null);
   assert.equal(evaluateStructuralDanger('ls -la', 'ls'), null);
+});
+
+// --- Round 2, Phase 2: morphology (splitMorphology, matchesFusedVerbPrefix, matchesPowerShellVerbNoun) ---
+
+test('morphology: splits camelCase', () => {
+  assert.deepEqual(splitMorphology('eraseDisk'), ['erase', 'Disk']);
+});
+test('morphology: splits PascalCase', () => {
+  assert.deepEqual(splitMorphology('RemoveItem'), ['Remove', 'Item']);
+});
+test('morphology: splits kebab-case', () => {
+  assert.deepEqual(splitMorphology('collect-garbage'), ['collect', 'garbage']);
+});
+test('morphology: splits snake_case', () => {
+  assert.deepEqual(splitMorphology('reset_git_repo'), ['reset', 'git', 'repo']);
+});
+test('morphology: handles a plain lowercase word (no split needed)', () => {
+  assert.deepEqual(splitMorphology('delete'), ['delete']);
+});
+test('morphology: handles mixed kebab+camel', () => {
+  assert.deepEqual(splitMorphology('force-DeleteAll'), ['force', 'Delete', 'All']);
+});
+test('morphology: non-string input returns empty array', () => {
+  assert.deepEqual(splitMorphology(undefined), []);
+});
+
+test('fused prefix: deletelocalsnapshots matches "delete"', () => {
+  assert.equal(matchesFusedVerbPrefix('deletelocalsnapshots'), 'delete');
+});
+test('fused prefix: erasedisk matches "erase"', () => {
+  assert.equal(matchesFusedVerbPrefix('erasedisk'), 'erase');
+});
+test('fused prefix: does NOT match an unrelated word', () => {
+  assert.equal(matchesFusedVerbPrefix('helloworld'), null);
+});
+test('fused prefix: does NOT match the verb alone with nothing appended', () => {
+  assert.equal(matchesFusedVerbPrefix('delete'), null);
+});
+test('fused prefix: non-string input returns null', () => {
+  assert.equal(matchesFusedVerbPrefix(undefined), null);
+});
+
+test('PowerShell verb-noun: Remove-Item matches "remove"', () => {
+  assert.equal(matchesPowerShellVerbNoun('remove-item'), 'remove');
+});
+test('PowerShell verb-noun: Stop-Service matches "stop"', () => {
+  assert.equal(matchesPowerShellVerbNoun('stop-service'), 'stop');
+});
+test('PowerShell verb-noun: Clear-Disk matches "clear"', () => {
+  assert.equal(matchesPowerShellVerbNoun('clear-disk'), 'clear');
+});
+test('PowerShell verb-noun: does NOT match a non-destructive verb-noun cmdlet', () => {
+  assert.equal(matchesPowerShellVerbNoun('get-process'), null);
+});
+test('PowerShell verb-noun: does NOT match a head command with no hyphen', () => {
+  assert.equal(matchesPowerShellVerbNoun('npm'), null);
+});
+test('PowerShell verb-noun: does NOT match docker-compose (compose is not in the verb list)', () => {
+  assert.equal(matchesPowerShellVerbNoun('docker-compose'), null);
+});
+
+test('verbFamily: classifies "delete" as removal', () => {
+  assert.equal(verbFamily('delete'), 'removal');
+});
+test('verbFamily: classifies "forget" as separation', () => {
+  assert.equal(verbFamily('forget'), 'separation');
+});
+test('verbFamily: classifies "gc" as reduction', () => {
+  assert.equal(verbFamily('gc'), 'reduction');
+});
+test('verbFamily: returns null for an unrecognized word', () => {
+  assert.equal(verbFamily('banana'), null);
+});
+
+// --- Round 2, Phase 2: end-to-end morphology/non-POSIX cases via matchesDestructiveVerbAndTarget ---
+
+test('round-2: diskutil eraseDisk (camelCase verb in argument + bare device identifier target)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('diskutil eraseDisk APFS Untitled disk2', 'diskutil').matched, true);
+});
+test('round-2: PowerShell Remove-Item with -Force matches', () => {
+  assert.equal(
+    matchesDestructiveVerbAndTarget('Remove-Item -Path C:\\inetpub\\wwwroot -Recurse -Force', 'remove-item').matched,
+    true
+  );
+});
+test('round-2: fastlane colon-value force:true matches', () => {
+  assert.equal(
+    matchesDestructiveVerbAndTarget('fastlane run reset_git_repo skip_clean:false force:true', 'fastlane').matched,
+    true
+  );
+});
+test('round-2: does NOT match a PowerShell Get-* cmdlet (non-destructive verb)', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('Get-Process | Where-Object {$_.Name -eq \'x\'}', 'get-process').matched, false);
+});
+test('round-2: does NOT match a benign colon-value flag with no destructive verb present', () => {
+  assert.equal(matchesDestructiveVerbAndTarget('somecli run build_app verbose:true', 'somecli').matched, false);
 });

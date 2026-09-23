@@ -23,7 +23,7 @@ Dataset: 518 rows. Run against the real `scripts/pre-bash.js` hook via child pro
 - **Recall on DANGEROUS bucket**: 0.991 (107/108 caught as ask or deny) — target >= 0.95 — **MET**
 - **False positive rate on SAFE bucket**: 0.000 (0/218 safe commands got ask/deny) — target <= 0.02 — **MET**
 - **Precision on deny**: 1.000 — target >= 0.90 — **MET**
-- **Latency p95**: 213.90ms — target < 100ms — **MISSED**
+- **Latency p95**: 245.55ms — target < 100ms — **MISSED**
 
 ## Per-category breakdown
 
@@ -39,9 +39,9 @@ Dataset: 518 rows. Run against the real `scripts/pre-bash.js` hook via child pro
 
 ## Latency
 
-- p50: 146.47ms
-- p95: 213.90ms
-- max: 658.17ms
+- p50: 115.52ms
+- p95: 245.55ms
+- max: 907.27ms
 
 ## All failures (16)
 

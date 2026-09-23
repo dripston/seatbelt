@@ -1,5 +1,7 @@
 'use strict';
 
+const { assessReversibility } = require('./assess-reversibility');
+
 // Structural danger detection: recognizes the SHAPE of a destructive
 // command (verb + target, destructive flag combinations, high-risk
 // targets, inline destructive queries, publish/release shape) rather
@@ -21,45 +23,226 @@
 // (pre-bash.js's guardedRules path). This file never emits deny.
 
 /**
- * Signal A: destructive verb + target.
+ * Signal A: destructive verb + target + high-consequence check.
+ *
  * A head command followed (anywhere after it) by a subcommand/argument
  * matching a destructive verb, with a real TARGET argument following it
  * (a resource name, path, or identifier — NOT a --help/-h flag, and NOT
- * nothing at all). Catches "flux delete kustomization x",
- * "doctl databases delete x", "rclone purge remote:x",
+ * nothing at all) — AND the invocation must also score as
+ * high-consequence on the reversibility axis (scripts/lib/assess-
+ * reversibility.js). Catches "flux delete kustomization x",
+ * "doctl databases delete --force x", "rclone purge remote:x",
  * "influx bucket delete x", "git update-ref -d x" without knowing any of
  * those specific tools/binaries exist.
  *
- * Deliberately EXCLUDES "uninstall" and bare "remove"/"rm" of a named
- * PACKAGE (not a filesystem path) from firing here: "npm uninstall
- * lodash", "pip uninstall x -y" are extremely common, routine developer
- * actions (removing a dependency), not the kind of irreversible
- * infrastructure/data destruction this signal targets. Package
- * uninstalls are a fundamentally lower-risk action (reversible by
- * reinstalling) than deleting a cloud resource or a database. "rm" on an
- * actual filesystem path is still covered by the existing enumerated
- * "rm -rf" pattern in risky-commands.js, which requires the -r/-f flags
- * that make filesystem rm actually dangerous — a bare "rm file.txt" with
- * no recursive/force flag is a normal, low-risk, easily-undone-via-git
- * action and correctly falls through as allow here too.
+ * Verb vocabulary is organized by SEMANTIC FAMILY, not as a flat list of
+ * words that happened to appear in a failing test case (see round-2 fix:
+ * the original list only had "delete/destroy/drop/purge/..." because
+ * those were the words in known failures — this expansion instead
+ * enumerates the CONCEPTS a destructive command expresses, then lists
+ * each family's real-world synonyms). A word not in a family is not
+ * added, even if a specific test case would want it — if it doesn't fit
+ * a concept, it doesn't belong here.
+ *
+ * "uninstall"/"remove"/"rm"/"kill" are included in the vocabulary again
+ * (they were removed in round 1 to fix a false positive on "npm
+ * uninstall lodash"), but round 1's fix is now handled correctly by the
+ * reversibility gate instead of by removing the verb entirely: "npm
+ * uninstall lodash" still doesn't fire, not because "uninstall" isn't a
+ * destructive verb (it obviously can be), but because its TARGET is
+ * project-local and re-derivable (round 1's fix, generalized). "brew
+ * uninstall --force x" DOES fire, because --force suppresses
+ * confirmation regardless of how re-derivable the target looks.
  */
-const DESTRUCTIVE_VERBS = [
-  'delete', 'destroy', 'drop', 'purge', 'prune', 'wipe', 'flush',
-  'erase', 'truncate', 'revoke', 'terminate', 'teardown',
-];
+const VERB_FAMILIES = {
+  removal: ['remove', 'delete', 'rm', 'erase', 'drop', 'purge', 'discard', 'clear', 'clean', 'wipe', 'unlink', 'expunge', 'uninstall'],
+  termination: ['kill', 'stop', 'terminate', 'halt', 'abort', 'cancel'],
+  reduction: ['prune', 'trim', 'compact', 'vacuum', 'collect-garbage', 'gc', 'sweep'],
+  revocation: ['revoke', 'disable', 'deactivate', 'lock', 'mask'],
+  reset: ['reset', 'restore', 'rollback', 'revert', 'reinitialize', 'format'],
+  separation: ['detach', 'unmount', 'eject', 'evict', 'drain', 'forget', 'deregister', 'unregister'],
+  // Carried over from round 1, fit naturally into "removal"-adjacent but
+  // kept distinct since they don't have a common single-word synonym set:
+  destruction: ['destroy', 'truncate', 'flush', 'teardown'],
+};
+const DESTRUCTIVE_VERBS = Object.values(VERB_FAMILIES).flat();
+// Escape regex metacharacters in verbs that contain them (collect-garbage
+// has a hyphen, which is fine unescaped inside a word list, but kept
+// explicit here for safety if a future family member needs it).
+const VERB_ALTERNATION = DESTRUCTIVE_VERBS.map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 const NON_TARGET_RE = /^(--help|-h|--version|-v|--dry-run)$/i;
 const DESTRUCTIVE_VERB_RE = new RegExp(
-  `\\b(${DESTRUCTIVE_VERBS.join('|')})\\b\\s+(?:-{1,2}[A-Za-z][\\w-]*(?:[= ]\\S+)?\\s*)*(\\S+)`,
+  `\\b(${VERB_ALTERNATION})\\b\\s+(?:-{1,2}[A-Za-z][\\w-]*(?:[= ]\\S+)?\\s*)*(\\S+)`,
   'i'
 );
 
-function matchesDestructiveVerbAndTarget(text) {
+function verbFamily(verb) {
+  const lower = verb.toLowerCase();
+  for (const [family, members] of Object.entries(VERB_FAMILIES)) {
+    if (members.includes(lower)) return family;
+  }
+  return null;
+}
+
+/**
+ * Splits a single identifier token on case transitions and separators,
+ * so compound/fused verb forms become matchable words. Handles:
+ *   - camelCase: "eraseDisk"          -> ["erase", "Disk"]
+ *   - PascalCase: "RemoveItem"        -> ["Remove", "Item"]
+ *   - kebab-case: "collect-garbage"   -> ["collect", "garbage"] (already
+ *     handled by the hyphenated verb list itself, but this also covers
+ *     unexpected kebab compounds)
+ *   - snake_case: "reset_git_repo"    -> ["reset", "git", "repo"]
+ *   - lowercase-fused: "deletelocalsnapshots" -> attempts a best-effort
+ *     split by checking if the token STARTS WITH a known verb (see
+ *     matchesFusedVerb below) — a fully fused lowercase run like this
+ *     cannot be split generically without a dictionary, so that path is
+ *     handled separately as a prefix check, not by this tokenizer.
+ */
+function splitMorphology(token) {
+  if (typeof token !== 'string') return [];
+  return token
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // camelCase / PascalCase boundary
+    .replace(/[-_]/g, ' ') // kebab-case / snake_case
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+}
+
+/**
+ * Checks whether a single fused token (no separators, e.g.
+ * "deletelocalsnapshots", "eraseDisk" after morphology splitting still
+ * leaves "erase"+"Disk" as two words — this function additionally
+ * handles the case where camelCase/separator splitting isn't present at
+ * all and the verb is simply the PREFIX of a longer lowercase compound
+ * word, which is a common naming style for tool-specific subcommands
+ * (tmutil's "deletelocalsnapshots"). Returns the matched verb or null.
+ */
+function matchesFusedVerbPrefix(token) {
+  if (typeof token !== 'string') return null;
+  const lower = token.toLowerCase();
+  for (const verb of DESTRUCTIVE_VERBS) {
+    const plain = verb.replace('-', '');
+    if (lower.startsWith(plain) && lower.length > plain.length) {
+      // Require the fused word to plausibly continue as a real word (at
+      // least 2 more characters), so we don't match a coincidental short
+      // prefix (e.g. "resetting" starting with "reset" is fine and
+      // intentional, but this guards against pathological 1-char tails).
+      return verb;
+    }
+  }
+  return null;
+}
+
+/**
+ * PowerShell-style Verb-Noun cmdlets (Remove-Item, Clear-Disk,
+ * Stop-Service, Reset-ComputerMachinePassword) fuse the destructive verb
+ * into the HEAD COMMAND itself via a hyphen, e.g. headCommand extracted
+ * as "remove-item" by tokenize-command.js. The Verb-Noun shape IS the
+ * structural signal: split the head command on its FIRST hyphen and
+ * check whether the first half is a known destructive verb.
+ */
+function matchesPowerShellVerbNoun(headCommand) {
+  if (typeof headCommand !== 'string') return null;
+  const hyphenIndex = headCommand.indexOf('-');
+  if (hyphenIndex <= 0) return null;
+  const verbPart = headCommand.slice(0, hyphenIndex).toLowerCase();
+  if (DESTRUCTIVE_VERBS.includes(verbPart)) return verbPart;
+  return null;
+}
+
+function matchesDestructiveVerbAndTarget(text, headCommand) {
   if (typeof text !== 'string') return { matched: false };
+
+  let verb = null;
+  let target = null;
+
   const m = DESTRUCTIVE_VERB_RE.exec(text);
-  if (!m) return { matched: false };
-  const target = m[2];
-  if (!target || NON_TARGET_RE.test(target)) return { matched: false };
-  return { matched: true, verb: m[1].toLowerCase(), signal: 'A' };
+  if (m) {
+    verb = m[1].toLowerCase();
+    target = m[2];
+  } else {
+    // Morphology fallback: no plain-word verb match. Try, in order:
+    // (a) a PowerShell-style Verb-Noun head command,
+    // (b) a camelCase/snake_case-fused verb inside ANY word of the
+    //     command (the head command OR any argument/subcommand token —
+    //     e.g. "diskutil eraseDisk" has the fused verb in the argument,
+    //     not the head), or
+    // (c) a fused lowercase prefix like "deletelocalsnapshots" in any word.
+    const psVerb = matchesPowerShellVerbNoun(headCommand);
+    if (psVerb) {
+      verb = psVerb;
+      // For PowerShell cmdlets, the "target" is whatever argument follows
+      // the cmdlet name — any non-flag token counts, since the verb is
+      // already fully expressed in the head command itself.
+      const afterHead = text.slice(text.toLowerCase().indexOf(headCommand.toLowerCase()) + headCommand.length);
+      const argMatch = /\s+(?:-{1,2}[A-Za-z][\w-]*(?:[= ]\S+)?\s*)*(\S+)/.exec(afterHead);
+      target = argMatch ? argMatch[1] : null;
+    } else {
+      // Scan every whitespace-delimited word in the text (not just the
+      // head command) for a morphology-split or fused-prefix verb match.
+      const allWords = text.split(/\s+/).filter((w) => w.length > 0);
+      for (const word of allWords) {
+        const split = splitMorphology(word);
+        const found = split.find((w) => DESTRUCTIVE_VERBS.includes(w.toLowerCase()));
+        if (found) {
+          verb = found.toLowerCase();
+          target = 'implicit';
+          break;
+        }
+        const fused = matchesFusedVerbPrefix(word);
+        if (fused) {
+          verb = fused;
+          target = 'implicit';
+          break;
+        }
+      }
+    }
+  }
+
+  if (!verb) return { matched: false };
+  if (target === null || (target !== 'implicit' && NON_TARGET_RE.test(target))) return { matched: false };
+
+  // "uninstall" specifically is a package-management concept, unlike
+  // "delete"/"drop"/"destroy" which apply broadly across infra/db/git
+  // contexts too. When the verb is "uninstall" AND the target looks like
+  // a bare package identifier (no path separator, no URI scheme, no
+  // colon-delimited resource address) — e.g. "pinecone-client",
+  // "left-pad", "lodash" — AND there is no --force/-f flag present (a
+  // routine -y/--yes skip-confirmation flag doesn't change the fact that
+  // reinstalling a package is trivial, but --force specifically means
+  // "skip dependency safety checks too," a materially more dangerous
+  // action — see the brew-uninstall-vs-npm-uninstall contrast case this
+  // whole reversibility axis was built around) — treat it as
+  // low-consequence. This was a real false positive found during round-2
+  // testing ("pip uninstall pinecone-client -y"): a bare, pathless target
+  // is itself evidence this is package management, not filesystem/infra
+  // destruction. Scoped to "uninstall" alone so it does NOT weaken
+  // "delete"/"drop"/"destroy" detection on bare identifiers like
+  // "dropdb production" or "redis-cli FLUSHALL" elsewhere.
+  const BARE_PACKAGE_IDENTIFIER_RE = /^[\w.@-]+$/;
+  const FORCE_FLAG_RE = /--force\b|(?<!\w)-f\b/i;
+  if (
+    verb === 'uninstall' &&
+    target !== 'implicit' &&
+    BARE_PACKAGE_IDENTIFIER_RE.test(target) &&
+    !FORCE_FLAG_RE.test(text)
+  ) {
+    return { matched: false };
+  }
+
+  // The reversibility gate: a destructive verb alone is not enough. See
+  // scripts/lib/assess-reversibility.js — this is what lets "uninstall"
+  // back into the vocabulary without "npm uninstall lodash" firing.
+  const reversibility = assessReversibility(text, headCommand);
+  if (!reversibility.highConsequence) return { matched: false };
+
+  return {
+    matched: true,
+    verb,
+    family: verbFamily(verb),
+    signal: 'A',
+    reason: `destructive verb (${verb}) + high-consequence target: ${reversibility.reasons.join(', ')}`,
+  };
 }
 
 /**
@@ -77,8 +260,14 @@ function matchesDestructiveFlags(text, headCommand) {
 
   if (/--no-preserve-root\b/i.test(text)) return { matched: true, signal: 'B', reason: '--no-preserve-root' };
   if (/\bgit\b.*?\breset\b.*?--hard\b/is.test(text)) return { matched: true, signal: 'B', reason: '--hard reset' };
-  if (/\bprune\b/i.test(text) && /\b(git|npm|docker|helm)\b/i.test(text)) {
-    return { matched: true, signal: 'B', reason: 'prune' };
+  // A bare --prune/--gc/--compact FLAG (not the verb form already covered
+  // by signal A's reduction family) combined with a high-consequence
+  // target, on any binary. Round-1 version hardcoded git/npm/docker/helm
+  // as the only tools allowed to trigger this; removed in favor of the
+  // reversibility axis, so nix/restic/any other tool's --prune-style flag
+  // is caught the same way without naming it.
+  if (/--(prune|gc|compact|vacuum)\b/i.test(text) && assessReversibility(text, headCommand).highConsequence) {
+    return { matched: true, signal: 'B', reason: '--prune/--gc/--compact/--vacuum + high-consequence target' };
   }
   if (headCommand && KILL_LIKE_HEADS.has(headCommand) && /-9\b|SIGKILL\b/i.test(text)) {
     return { matched: true, signal: 'B', reason: 'kill -9 / SIGKILL' };
@@ -99,9 +288,13 @@ function matchesDestructiveFlags(text, headCommand) {
   if (/(--force\b|(?<!\w)-[a-zA-Z]*f[a-zA-Z]*\b)/i.test(text) && DESTRUCTIVE_VERB_RE.test(text)) {
     return { matched: true, signal: 'B', reason: '--force/-f + destructive verb' };
   }
-  // --all paired with delete
-  if (/--all\b/i.test(text) && /\bdelete\b/i.test(text)) {
-    return { matched: true, signal: 'B', reason: '--all + delete' };
+  // A "scope-widening" flag (--all/-a) paired with ANY destructive verb
+  // (not just "delete") — widening a cleanup/removal operation from "one
+  // thing" to "everything" is itself a consequence-raising signal, e.g.
+  // "docker system prune -a" (all unused resources, not just dangling
+  // ones) or "kubectl delete pods --all".
+  if (/(--all\b|(?<!\w)-a\b)/i.test(text) && DESTRUCTIVE_VERB_RE.test(text)) {
+    return { matched: true, signal: 'B', reason: '--all/-a + destructive verb (scope-widening)' };
   }
   // a sync tool's --delete flag (rsync --delete, etc.) mirrors/wipes the destination
   if (/--delete\b/i.test(text) && /\brsync\b/i.test(text)) {
@@ -283,7 +476,7 @@ function matchesIrreducible(text, headCommand) {
  */
 function evaluateStructuralDanger(text, headCommand) {
   const checks = [
-    () => matchesDestructiveVerbAndTarget(text),
+    () => matchesDestructiveVerbAndTarget(text, headCommand),
     () => matchesDestructiveFlags(text, headCommand),
     () => matchesHighRiskTarget(text),
     () => matchesInlineDestructiveQuery(text),
@@ -305,6 +498,11 @@ module.exports = {
   matchesPublishShape,
   matchesIrreducible,
   evaluateStructuralDanger,
+  splitMorphology,
+  matchesFusedVerbPrefix,
+  matchesPowerShellVerbNoun,
+  verbFamily,
+  VERB_FAMILIES,
   DESTRUCTIVE_VERBS,
   IRREDUCIBLE_HEADS,
 };
