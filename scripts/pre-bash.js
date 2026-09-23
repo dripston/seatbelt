@@ -2,7 +2,7 @@
 'use strict';
 
 const { findAndParseRules, guardPatternToRegExp } = require('./lib/parse-rules');
-const { splitCommand } = require('./lib/split-command');
+const { splitCommandKeepPipes } = require('./lib/split-command');
 const { getRiskyCommands } = require('./risky-commands');
 const { classifySegment, normalizeWhitespace } = require('./lib/tokenize-command');
 
@@ -48,7 +48,12 @@ function decide(command, cwd) {
     // pattern matching. Fixed in the fix-pass (was a real, confirmed
     // bug; see evals/results/VERDICT.md).
     const normalizedCommand = normalizeWhitespace(command);
-    const segments = splitCommand(normalizedCommand);
+    // Split on &&/; only here, deliberately NOT on pipe (|) — classifySegment
+    // needs to see an intact "a | b" relationship to correctly detect
+    // piping into a shell interpreter as turning inert quoted text into a
+    // real invocation. See split-command.js's splitCommandKeepPipes doc
+    // comment; this was a real, confirmed bug (Phase 5 re-evaluation).
+    const segments = splitCommandKeepPipes(normalizedCommand);
     const segmentsToCheck = segments.length > 0 ? segments : [normalizedCommand];
 
     // Run the lightweight command-structure pass on each segment: for a

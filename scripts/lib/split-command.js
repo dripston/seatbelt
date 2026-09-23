@@ -1,15 +1,14 @@
 'use strict';
 
 /**
- * Splits a shell command string into segments on &&, ;, and |, so each
- * can be checked independently against guard/risky patterns. This is a
- * pragmatic tokenizer, not a full shell parser: it respects single and
- * double quotes (so a quoted string containing "&&" or "|" is not split),
- * but does not handle every POSIX edge case. Fail-open philosophy: if
- * something looks ambiguous, prefer returning the whole string as one
- * segment over throwing.
+ * Core splitter: breaks a command string on the given single-character
+ * delimiters (plus literal "&&" as a two-character case), respecting
+ * single/double quotes so a delimiter inside a quoted string is not
+ * treated as a real separator. Fail-open philosophy: if something looks
+ * ambiguous, prefer returning the whole string as one segment over
+ * throwing.
  */
-function splitCommand(command) {
+function splitOn(command, singleCharDelims, splitOnDoubleAmp) {
   if (typeof command !== 'string' || command.length === 0) return [];
 
   const segments = [];
@@ -33,15 +32,13 @@ function splitCommand(command) {
     }
 
     if (!inSingle && !inDouble) {
-      if (ch === '&' && next === '&') {
+      if (splitOnDoubleAmp && ch === '&' && next === '&') {
         segments.push(current);
         current = '';
         i++; // skip second '&'
         continue;
       }
-      if (ch === ';' || ch === '|') {
-        // Don't split on '||' incorrectly: treat each '|' the same,
-        // since either way both sides are separate commands to check.
+      if (singleCharDelims.includes(ch)) {
         segments.push(current);
         current = '';
         continue;
@@ -55,4 +52,31 @@ function splitCommand(command) {
   return segments.map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
-module.exports = { splitCommand };
+/**
+ * Splits a shell command string into segments on &&, ;, and |, so each
+ * can be checked independently against guard/risky patterns. This is a
+ * pragmatic tokenizer, not a full shell parser: it respects single and
+ * double quotes (so a quoted string containing "&&" or "|" is not split),
+ * but does not handle every POSIX edge case.
+ */
+function splitCommand(command) {
+  return splitOn(command, [';', '|'], true);
+}
+
+/**
+ * Splits a shell command string into segments on && and ; ONLY — NOT on
+ * pipe (|). Used ahead of tokenize-command.js's classifySegment, which
+ * needs to see an unsplit "a | b" relationship intact to correctly detect
+ * when piping into a shell interpreter (e.g. "echo '...' | bash") turns
+ * an otherwise-inert quoted string into a real invocation. classifySegment
+ * does its own internal pipe-splitting once it has the full segment.
+ * Splitting on pipe here first, before classifySegment ever sees it,
+ * would silently defeat that evaluator-detection logic — this was a real,
+ * confirmed bug found in the fix-pass (Phase 5 re-evaluation; see
+ * evals/results/VERDICT-2.md).
+ */
+function splitCommandKeepPipes(command) {
+  return splitOn(command, [';'], true);
+}
+
+module.exports = { splitCommand, splitCommandKeepPipes };

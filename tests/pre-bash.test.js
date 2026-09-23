@@ -206,3 +206,33 @@ test('but: a real git push chained after a benign echo is still caught', () => {
   const result = decide('echo start && git push origin main', dir);
   assert.equal(result.decision, 'deny');
 });
+
+// --- Phase 5 regression: piping a quoted risky string into a shell must
+// still be caught. Found because pre-bash.js's own &&/;/| segment split
+// was running BEFORE classifySegment could see the "a | bash" relationship
+// intact, silently defeating the evaluator-detection logic from Phase 2.
+// Fixed by switching to splitCommandKeepPipes ahead of classifySegment.
+
+test('regression: echo of a risky string piped into bash is still caught', () => {
+  const dir = mkEmptyProject();
+  const result = decide('echo "git push origin main" | bash', dir);
+  assert.equal(result.decision, 'ask');
+});
+
+test('regression: printf of a risky string piped into sh is still caught', () => {
+  const dir = mkEmptyProject();
+  const result = decide('printf "git push origin main" | sh', dir);
+  assert.equal(result.decision, 'ask');
+});
+
+test('regression: piping a risky string into bash still matches a guarded rule', () => {
+  const dir = mkProjectWithCritical('- Never git push without asking me first. [guard: git push]');
+  const result = decide('echo "git push origin main" | bash', dir);
+  assert.equal(result.decision, 'deny');
+});
+
+test('but: piping a genuinely inert string into cat (not a shell) stays allowed', () => {
+  const dir = mkEmptyProject();
+  const result = decide('echo "git push origin main" | cat', dir);
+  assert.equal(result.decision, 'allow');
+});
