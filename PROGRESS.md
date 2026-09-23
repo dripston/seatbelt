@@ -1,6 +1,36 @@
 # Progress: seatbelt build
 
-## Status: build complete (9 phases); eval rebuild complete (5 phases); fix pass complete (5 phases); generalization spot check complete — VERDICT REVISED: the 99.1% dangerous-recall figure does not generalize
+## Status: structural-detection rewrite in progress (replacing tool-name enumeration with command-shape detection)
+
+**Current effort**: after the generalization spot check found dangerous-recall collapses from 99.1% to 12.0% on unseen tools, rewrote detection around command STRUCTURE (destructive verb+target, destructive flags, high-risk targets, inline destructive queries, publish/release shape, a small irreducible list) instead of enumerated tool names — see `scripts/lib/structural-danger.js`. This does not replace the existing enumerated list in `scripts/risky-commands.js`; both run, either can trigger `ask`.
+
+### Structural rewrite: Phase 1 (build + tests)
+
+Built 6 independently-testable signals (A-F), each with its own predicate function and unit tests (81 tests total across all 6 signals plus combined-evaluation cases, well over the required minimum of 8 each). Every signal maps to `ask` only, never `deny` — hard deny remains reserved for a user's own guard-tagged rule, protecting the deny-precision number.
+
+3 real bugs found and fixed while building against the full test suite (not fixed by adding tool names — fixed by narrowing the structural rule itself, consistent with the plan's hard rule):
+1. **Signal A too loose**: matched `--help`/`-h` as a "target" (false-positived on `git reset --help`, `rm --help`), and included `uninstall`/`remove`/`rm`/`kill` in the destructive-verb list, wrongly flagging routine package uninstalls (`npm uninstall lodash`, `pip uninstall x -y`) and any `rm <file>` with no recursive/force flag. Fixed by requiring a real target (excluding `--help`/`-h`/`--version`/`--dry-run`) and removing `uninstall`/`remove`/`rm`/`kill` from the verb list (kill is separately covered by signal B's `-9`/SIGKILL check; bare filesystem `rm` without `-r`/`-f` is genuinely low-risk and reversible via git).
+2. **Signal C's prod-target check fired standalone**: `export NODE_ENV=production` (a harmless env var assignment) was flagged just for containing the word "production," with no action verb at all. Fixed by requiring an action-indicator word (stop/restart/delete/deploy/etc.) alongside the prod/production/live mention.
+3. **Signal B's --recursive+rm check caught `git rm -r --cached x`**: a common, safe git operation (untracking files without touching them on disk) inherently contains both "-r" and "rm." Fixed with a narrow, explicit exception for `git rm ... --cached`.
+4. **Signal F's irreducible-list check was free-text search, not head-command-aware**: matched "wipefs" appearing inside a URL (`curl .../wipefs-notes.md`) — the exact bug class the tokenizer exists to prevent, reintroduced by not using `headCommand`. Fixed to check the head command specifically via the already-defined but previously-unused `IRREDUCIBLE_HEADS` set.
+5. **Signal C's cloud-URI check fired on read-only operations**: `aws s3 ls s3://prod-bucket/...` (listing, not deleting) was flagged just for containing an s3:// URI. Fixed with an explicit-read-only-verb exclusion (`ls`/`cat`/`get`/`describe`/etc.).
+
+Gate met: 177/177 unit tests pass (up from 96 before this rewrite).
+
+### Structural rewrite: Phase 2 (full suite + per-signal table)
+
+| Dataset | Before structural detection | After structural detection + fixes |
+|---|---|---|
+| Main dataset (518 rows) | 96.9% overall, dangerous recall 99.1%, safe FPR 0.0%, deny precision 100.0% | **96.9% overall (unchanged), dangerous recall 99.1% (unchanged), safe FPR 0.0% (unchanged), deny precision 100.0% (unchanged)** — structural detection added zero net regression on the training-adjacent set |
+| First holdout (40 rows, now burned as a training signal per the plan) | 40.0% overall; dangerous recall 12.0%; near-miss 86.7% | **75.0% overall; dangerous recall 72.0% (+60 points); near-miss 80.0% (-6.7 points, recovered from a mid-fix low of 66.7%)** |
+
+Per-signal firing table (measured against main dataset + burned holdout, 558 rows total): all 6 signals show 92-100% precision in isolation — no signal is "fires often and is usually wrong," so per the plan's own criterion, none required narrowing or dropping beyond the fixes already applied. Full table: [evals/results/SIGNAL_FIRING_TABLE.md](evals/results/SIGNAL_FIRING_TABLE.md). Remaining known false-positive sources (documented, not chased further before the honest Phase 3 measurement): `psql -c "EXPLAIN DELETE..."` (signal D doesn't understand SQL semantics), `stat .../shutdown.log` and `terraform plan` (pre-existing enumerated-list issues, not from structural detection).
+
+Safe FPR stayed at or under target (0.0% final, briefly 1.8% mid-fix before the above bugs were fixed) — never needed the "tighten before Phase 3" escalation the plan describes, since each false positive was fixed as found.
+
+### Next: Phase 3 (second holdout, built blind) and Phase 4 (VERDICT-3.md) — not yet done as of this update.
+
+## Prior status: VERDICT REVISED: the 99.1% dangerous-recall figure does not generalize
 
 **Most recent, most important finding**: a held-out generalization check (25 dangerous rows + 15 near-miss rows, using tools/syntax never present in the training-adjacent dataset — different package managers, cloud providers, databases, system utilities) found dangerous-command recall collapses from 99.1% to **12.0%** on genuinely novel tools. The near-miss/precision mechanism generalized much better (86.7% vs 91.1%). Full detail: [evals/results/HOLDOUT_REPORT.md](evals/results/HOLDOUT_REPORT.md), [evals/results/HOLDOUT_OVERLAP.md](evals/results/HOLDOUT_OVERLAP.md). This is not a new bug — it is the expected, now-measured consequence of Phase 3 building its risky-command list by mapping every new pattern to a specific known failure (as that phase was explicitly instructed to do), which produces a list that recognizes specific tools it has seen, not the general categories it is named after. Both VERDICT-2.md and README.md have been amended (not overwritten — both old and new numbers are shown, labeled) to reflect this. Revised bottom line: seatbelt is a reliable guard for the specific tools already enumerated in `scripts/risky-commands.js`, and offers close to no protection for the same categories of damage via a different, unlisted tool.
 

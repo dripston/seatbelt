@@ -5,6 +5,7 @@ const { findAndParseRules, guardPatternToRegExp } = require('./lib/parse-rules')
 const { splitCommandKeepPipes } = require('./lib/split-command');
 const { getRiskyCommands } = require('./risky-commands');
 const { classifySegment, normalizeWhitespace } = require('./lib/tokenize-command');
+const { evaluateStructuralDanger } = require('./lib/structural-danger');
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -65,7 +66,8 @@ function decide(command, cwd) {
     // real `git push` or a `eval "git push"`/`... | bash` still gets the
     // full text inspected. See docs/DESIGN.md for the tokenizer's scope
     // and limits — it's a heuristic, not a full shell parser.
-    const textsToMatch = segmentsToCheck.map((seg) => classifySegment(seg).textForMatching);
+    const classified = segmentsToCheck.map((seg) => classifySegment(seg));
+    const textsToMatch = classified.map((c) => c.textForMatching);
 
     const guardedRules = rules.filter((r) => r.guard);
     const risky = getRiskyCommands(cwd);
@@ -99,6 +101,29 @@ function decide(command, cwd) {
             reason: `This command matches a risky pattern (${entry.label}). Project critical rules:\n${ruleList}`,
           };
         }
+      }
+    }
+
+    // Structural danger detection: recognizes destructive command SHAPE
+    // (verb + target, destructive flags, high-risk targets, inline
+    // destructive queries, publish/release shape) rather than enumerated
+    // tool names, so it generalizes to tools not in the list above. Added
+    // after a holdout eval proved the enumerated list alone collapses
+    // from 99.1% to 12.0% recall on unseen tools — see
+    // evals/results/HOLDOUT_REPORT.md. Runs last (cheapest path for the
+    // common safe case, since guard rules and the enumerated list already
+    // returned above for anything they catch).
+    for (const c of classified) {
+      const structural = evaluateStructuralDanger(c.textForMatching, c.headCommand);
+      if (structural) {
+        const ruleList =
+          rules.length > 0
+            ? rules.map((r) => `- ${r.text}`).join('\n')
+            : '(no critical rules defined in CLAUDE.md/AGENTS.md for this project)';
+        return {
+          decision: 'ask',
+          reason: `This command has a destructive shape (${structural.reason || structural.signal}). Project critical rules:\n${ruleList}`,
+        };
       }
     }
 
