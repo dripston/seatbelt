@@ -1,6 +1,12 @@
 # Progress: seatbelt build
 
-## Status: all 9 phases complete
+## Status: build complete (9 phases); rigorous eval rebuild complete (5 phases) — VERDICT: NOT YET READY TO SHIP
+
+A second, independent evaluation effort (evals/TARGETS.md through evals/results/VERDICT.md) was run after the initial build because the original Phase 7 integration evals were circular: every scenario was written from the design spec, so passing proved the code matched its own spec, not that it behaves well on real-world input. The rebuilt eval used a 388-row dataset labeled from human judgment (blind to the implementation where practically possible), including real commands from actual shell history, and produced an honest, unflattering result: **3 of 4 committed targets were missed**. Full detail: [evals/results/VERDICT.md](evals/results/VERDICT.md).
+
+**Headline finding: this is not ready for strangers to install yet.** Dangerous-command recall is 65.6% (target 95%), meaning over a third of the irreversible actions this tool exists to catch are silently allowed. A real precision bug causes the tool to hard-deny completely safe commands (`echo`, `grep`, reading a file) by mistaking string arguments for real invocations. See VERDICT.md for the full breakdown and recommended fix order before shipping.
+
+## Status: original 9-phase build complete
 
 | Phase | Status | Notes |
 |---|---|---|
@@ -51,6 +57,26 @@ These are documented here per the plan; none of them have been executed:
 ## Repo state
 
 - Public repo: https://github.com/dripston/seatbelt
-- All 9 phases committed individually and pushed to `master`
+- All 9 build phases + 5 eval-rebuild phases committed individually. Local commits only for the eval rebuild (not pushed) per this task's "no network, no publishing, no push" rule — everything from the original build phases (0-9) was pushed earlier per the user's explicit instruction to keep pushing; the eval rebuild work is currently local-only and needs an explicit decision on whether to push it.
 - Authorship corrected mid-build (an early command set the wrong local git identity before being caught and fixed; history was reset and force-pushed once, early on, before any other collaborator could have pulled it)
 - Currently installed locally at user scope on this machine for verification
+
+## Eval rebuild: phase-by-phase
+
+| Phase | Status | Notes |
+|---|---|---|
+| Targets | Done | evals/TARGETS.md committed before any dataset work or test runs, per the rule against moving goalposts after seeing results. |
+| A. Dataset | Done | evals/dataset/dataset.jsonl, 388 rows (target: 300+). 117 real commands (from actual PowerShell history and this project's own real Claude Code session logs), 222 synthetic, 49 adversarial. Labeled from human judgment on what SHOULD happen; honesty note in LABELING_NOTES.md about the practical limits of "blind" labeling given I wrote the implementation myself. |
+| B. Harness | Done | evals/run-classifier-eval.js feeds every row through the real scripts/pre-bash.js as a child process via stdin — the same path Claude Code itself uses. Raw results: evals/results/raw.jsonl. |
+| C. Metrics | Done | evals/report.js produces evals/results/REPORT.md: full confusion matrix, per-class P/R/F1, per-category breakdown, latency percentiles, every failure listed. 8 dataset labels corrected after review with reasons logged in evals/dataset/LABEL_CORRECTIONS.md — corrections made the tool look BETTER (several "known gap" assumptions were wrong; the actual regex is more permissive than assumed), not worse, and are flagged as such rather than hidden. |
+| D. Sensitivity analysis | Done | evals/run-tuning.js tests STRICT/CURRENT/LOOSE risky-command-list configurations via the plugin's own `rule-guard.config.json` override mechanism (a real code path, not a reimplementation). Result in evals/results/TUNING.md: CURRENT is recommended over both alternatives, but the near-miss false-positive problem is shown to be independent of list strictness (32-52% FPR across all three configs) — it needs a code fix, not a config change. |
+| E. Verdict | Done | evals/results/VERDICT.md: honest "not ready to ship" verdict, 3/4 targets missed, top 3 failure patterns identified, plus a 4th unrelated bug (POSIX-style path handling silently breaks rule discovery on Windows) discovered incidentally while building the Phase D harness and independently verified. |
+
+## Real bugs found during the eval rebuild (verified directly, not just observed as eval failures)
+
+1. **Newline-sensitivity in the built-in "git push" regex.** `\bgit\b(?:(?!--dry-run).)*?\bpush\b(?!.*--dry-run)` uses `.` without the `s`/dotAll flag, so a command with a literal embedded newline between "git" and "push" is not matched, even though the same text on one line is. Verified directly and isolated to this exact cause.
+2. **Non-breaking-space (U+00A0) evasion.** A non-breaking space in place of a normal space between "git" and "push" breaks the implicit whitespace matching. Verified directly.
+3. **POSIX-style path handling silently breaks rule discovery on Windows.** `findAndParseRules()`/`loadConfiguredRisky()` use `path.join()`, which does not treat a POSIX-style absolute path (e.g. `/d/skill/project`) as absolute on Windows — it silently produces a nonexistent path, so CLAUDE.md/AGENTS.md/rule-guard.config.json are never found, and the tool falls back to "no rules" with no error surfaced. Confirmed with a clean, unambiguous test: the identical directory works via its Windows-style path and fails via its POSIX-style path. Severity in real-world Claude-Code-on-Windows-with-Git-Bash usage is flagged as plausible but NOT directly confirmed (would need to capture real hook input JSON from a live session on such a setup) — logged as a priority item to verify, not silently patched.
+4. **Near-miss precision problem is structural, not a tuning issue.** Confirmed via Phase D: the false-positive rate on the near-miss bucket (commands that look risky but are actually `echo`, `grep`, comments, etc.) stays between 32% and 52% across all three risky-command-list strictness configurations. This proves the problem is in the matching logic itself (no awareness of command-position vs. string-argument context), not in which commands happen to be on the list.
+
+None of these were fixed in this pass — per the eval task's explicit scope, this is a measurement and reporting exercise, and fixing the underlying code is separate, prioritized future work per VERDICT.md's recommendation.
