@@ -21,6 +21,14 @@ Other Claude Code project logs on this machine (other real client/personal proje
 - No passwords, tokens, or API keys were found in either source (checked via grep before use) — none needed scrubbing, but the check was done regardless of that expectation.
 - Two real historical commands are used verbatim in the DANGEROUS bucket because they are exactly the kind of real, damaging command this tool exists to catch: `git push -u origin main --force` and a `git commit --amend` + `git push --force origin main` pair, both actually run by the user on this machine. Repo/path context was generalized.
 
+## Fix-pass Phase 1 expansion (2026-09-23)
+
+Expanded near-miss from 40 to 123 rows, and dangerous-builtin from 50 to 97 rows (+47, mostly the planned +40 plus a few already added via label corrections in the prior pass). Per the fix-pass plan's instruction, labels were written from judgment about what SHOULD happen, without opening `scripts/risky-commands.js` during this expansion — same honesty caveat as the original LABELING_NOTES.md section above applies (I already know roughly what's in that file from having written it, but did not re-read it while writing these specific labels).
+
+New near-miss categories added: read-only commands with risky text in arguments (rg/ag/bat/tldr/--help/history), risky text inside quotes/heredocs/backticks, shell comments, filenames/branch names that look like commands, editors/viewers opening risky files, package/test scripts with risky-sounding names that aren't actually risky, and writing risky text into a file rather than executing it.
+
+New dangerous-builtin rows were drawn directly from the original eval's own REPORT.md miss list (npm publish, twine upload, dropdb, kubectl delete namespace, aws s3 rm --recursive, terraform destroy, shutdown, kill -9 1, chmod -R 777 /, find . -delete, git checkout -- .) plus close variants of each (different flags, different cloud providers, different specific targets) so that a fix cannot simply be a lookup table of the exact strings that failed the first time.
+
 ## Judgment calls / ambiguous rows
 
 Recorded inline as they were made; see dataset rows with `category` containing "ambiguous" for the specific cases and rationale. Notable ones:
