@@ -5,20 +5,24 @@
 // can name the exact thing that matched.
 // Matches "git" followed eventually by "push", tolerating flags/args in
 // between (e.g. "git -C repo push", "git --no-pager push"), by allowing
-// any non-newline characters between the two words rather than requiring
-// them adjacent.
+// any characters between the two words rather than requiring them
+// adjacent. All patterns use the `s` (dotAll) flag so `.` also matches
+// embedded newlines (e.g. a backslash line-continuation between "git"
+// and "push") — without it, `.` stops at a literal \n and a command
+// split across lines silently evades detection. Fixed in the fix-pass
+// (was a real, confirmed bug; see evals/results/VERDICT.md).
 const BUILTIN_RISKY = [
-  { label: 'git push', re: /\bgit\b(?:(?!--dry-run).)*?\bpush\b(?!.*--dry-run)/i },
-  { label: 'git push --force / -f', re: /\bgit\b.*?\bpush\b.*\s(--force|-f)\b/i },
-  { label: 'git reset --hard', re: /\bgit\b.*?\breset\b.*--hard\b/i },
-  { label: 'git clean -f', re: /\bgit\b.*?\bclean\b.*-f/i },
-  { label: 'git branch -D', re: /\bgit\b.*?\bbranch\b.*-D\b/i },
-  { label: 'rm -rf', re: /\brm\s+.*-[a-z]*r[a-z]*f|\brm\s+.*-[a-z]*f[a-z]*r/i },
-  { label: 'git checkout -- .', re: /\bgit\b.*?\bcheckout\b\s+--\s+\.\b/i },
-  { label: 'vercel --prod', re: /\bvercel\b.*--prod\b/i },
-  { label: 'firebase deploy', re: /\bfirebase\s+deploy\b/i },
-  { label: 'kubectl apply', re: /\bkubectl\s+apply\b/i },
-  { label: 'terraform apply', re: /\bterraform\s+apply\b/i },
+  { label: 'git push', re: /\bgit\b(?:(?!--dry-run).)*?\bpush\b(?!.*--dry-run)/is },
+  { label: 'git push --force / -f', re: /\bgit\b.*?\bpush\b.*\s(--force|-f)\b/is },
+  { label: 'git reset --hard', re: /\bgit\b.*?\breset\b.*--hard\b/is },
+  { label: 'git clean -f', re: /\bgit\b.*?\bclean\b.*-f/is },
+  { label: 'git branch -D', re: /\bgit\b.*?\bbranch\b.*-D\b/is },
+  { label: 'rm -rf', re: /\brm\s+.*-[a-z]*r[a-z]*f|\brm\s+.*-[a-z]*f[a-z]*r/is },
+  { label: 'git checkout -- .', re: /\bgit\b.*?\bcheckout\b\s+--\s+\.\b/is },
+  { label: 'vercel --prod', re: /\bvercel\b.*--prod\b/is },
+  { label: 'firebase deploy', re: /\bfirebase\s+deploy\b/is },
+  { label: 'kubectl apply', re: /\bkubectl\s+apply\b/is },
+  { label: 'terraform apply', re: /\bterraform\s+apply\b/is },
 ];
 
 function loadConfiguredRisky(cwd) {
@@ -35,7 +39,7 @@ function loadConfiguredRisky(cwd) {
       .filter((s) => typeof s === 'string' && s.length > 0)
       .map((s) => ({
         label: s,
-        re: new RegExp(s.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*'), 'i'),
+        re: new RegExp(s.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*'), 'is'),
       }));
   } catch (_err) {
     // Fail open: bad config means fall back to built-in list, never crash.

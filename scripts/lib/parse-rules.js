@@ -142,11 +142,19 @@ function guardPatternToRegExp(pattern) {
   const escaped = pattern
     .split('*')
     .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-    // Collapse runs of literal whitespace into \s+ so "git push" still
-    // matches "git  push" (double space) or other incidental spacing.
-    .map((part) => part.replace(/\s+/g, '\\s+'))
+    // Collapse runs of literal whitespace into a class that tolerates
+    // incidental spacing variations: repeated/tab/newline whitespace
+    // ("git  push"), and a Bash backslash line-continuation ("git\" +
+    // newline + "push", where a literal backslash sits between the word
+    // and the newline). \\?\s+ matches an optional backslash followed by
+    // one or more whitespace characters.
+    .map((part) => part.replace(/\s+/g, '\\\\?\\s+'))
     .join('.*');
-  return new RegExp(escaped, 'i');
+  // 's' (dotAll) flag: '.' must also match embedded newlines, otherwise a
+  // command split across lines (e.g. a backslash line-continuation)
+  // silently evades a guard pattern. Fixed in the fix-pass (was a real,
+  // confirmed bug; see evals/results/VERDICT.md).
+  return new RegExp(escaped, 'is');
 }
 
 module.exports = {

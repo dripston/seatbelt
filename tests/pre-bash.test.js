@@ -94,11 +94,12 @@ test('adversarial: env var prefix does not evade detection', () => {
 test('adversarial: echo "git push" should NOT trigger (quoted string, not an actual push)', () => {
   const dir = mkEmptyProject();
   const result = decide('echo "git push"', dir);
-  // Known limitation: our matcher is regex-based, not a real shell parser,
-  // so it cannot distinguish a quoted string from a real invocation.
-  // We document this rather than pretend otherwise. Assert current actual
-  // behavior so a future change to this behavior is a deliberate, visible diff.
-  assert.equal(result.decision, 'ask');
+  // Fixed in the fix-pass (Phase 2, tokenize-command.js): echo is a
+  // read-only head command, so text inside its arguments is no longer
+  // exposed to risky-pattern matching. This was a real, confirmed
+  // false-positive bug in the original build (see evals/results/VERDICT.md)
+  // — the test now asserts the corrected, intended behavior.
+  assert.equal(result.decision, 'allow');
 });
 
 test('malformed CLAUDE.md does not crash decide(), fails open', () => {
@@ -116,4 +117,92 @@ test('performance: decide() completes well under 100ms', () => {
   decide('git push origin main', dir);
   const elapsed = Date.now() - start;
   assert.ok(elapsed < 100, `decide() took ${elapsed}ms, expected <100ms`);
+});
+
+// --- Fix-pass Phase 2: newline-sensitivity and whitespace-normalization fixes ---
+
+test('newline: backslash line-continuation between git and push is still caught (built-in list)', () => {
+  const dir = mkEmptyProject();
+  const result = decide('git\\\n  push origin main', dir);
+  assert.equal(result.decision, 'ask');
+});
+
+test('newline: backslash line-continuation is still caught by a guarded rule', () => {
+  const dir = mkProjectWithCritical('- Never push. [guard: git push]');
+  const result = decide('git\\\n  push origin main', dir);
+  assert.equal(result.decision, 'deny');
+});
+
+test('whitespace: non-breaking space (U+00A0) between git and push is normalized and still caught', () => {
+  const dir = mkEmptyProject();
+  const result = decide('git push origin main', dir);
+  assert.equal(result.decision, 'ask');
+});
+
+test('whitespace: figure space (U+2007) is normalized and still caught', () => {
+  const dir = mkEmptyProject();
+  const result = decide('git push origin main', dir);
+  assert.equal(result.decision, 'ask');
+});
+
+test('whitespace: narrow no-break space (U+202F) is normalized and still caught', () => {
+  const dir = mkEmptyProject();
+  const result = decide('git push origin main', dir);
+  assert.equal(result.decision, 'ask');
+});
+
+test('whitespace: ideographic space (U+3000) is normalized and still caught', () => {
+  const dir = mkEmptyProject();
+  const result = decide('git　push origin main', dir);
+  assert.equal(result.decision, 'ask');
+});
+
+test('whitespace: guarded rule pattern still matches through a non-breaking space in the command', () => {
+  const dir = mkProjectWithCritical('- Never push. [guard: git push]');
+  const result = decide('git push origin main', dir);
+  assert.equal(result.decision, 'deny');
+});
+
+// --- Fix-pass Phase 2: near-miss precision fixes (tokenizer integration) ---
+
+test('near-miss: echo with reminder text quoting a rule is NOT denied', () => {
+  const dir = mkProjectWithCritical('- Never git push without asking me first. [guard: git push]');
+  const result = decide('echo "reminder: never git push without asking"', dir);
+  assert.equal(result.decision, 'allow');
+});
+
+test('near-miss: grep for DROP TABLE is NOT denied even with a matching guard rule', () => {
+  const dir = mkProjectWithCritical('- Never drop a database table. [guard: DROP TABLE]');
+  const result = decide('grep "DROP TABLE" schema.sql', dir);
+  assert.equal(result.decision, 'allow');
+});
+
+test('near-miss: git log --grep does not trigger on the searched text', () => {
+  const dir = mkEmptyProject();
+  const result = decide('git log --grep="push"', dir);
+  assert.equal(result.decision, 'allow');
+});
+
+test('near-miss: a shell comment mentioning a risky command is inert', () => {
+  const dir = mkEmptyProject();
+  const result = decide('# git push later once tests pass', dir);
+  assert.equal(result.decision, 'allow');
+});
+
+test('near-miss: writing risky text to a file via redirection is inert', () => {
+  const dir = mkEmptyProject();
+  const result = decide('echo "git push" >> notes.md', dir);
+  assert.equal(result.decision, 'allow');
+});
+
+test('but: eval of a real push string is still caught (evaluator, not inert)', () => {
+  const dir = mkEmptyProject();
+  const result = decide('eval "git push origin main"', dir);
+  assert.equal(result.decision, 'ask');
+});
+
+test('but: a real git push chained after a benign echo is still caught', () => {
+  const dir = mkProjectWithCritical('- Never git push without asking me first. [guard: git push]');
+  const result = decide('echo start && git push origin main', dir);
+  assert.equal(result.decision, 'deny');
 });

@@ -4,6 +4,7 @@
 const { findAndParseRules, guardPatternToRegExp } = require('./lib/parse-rules');
 const { splitCommand } = require('./lib/split-command');
 const { getRiskyCommands } = require('./risky-commands');
+const { classifySegment, normalizeWhitespace } = require('./lib/tokenize-command');
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -41,13 +42,30 @@ function emitDecision(decision, reason) {
 function decide(command, cwd) {
   try {
     const { rules } = findAndParseRules(cwd);
-    const segments = splitCommand(command);
-    const segmentsToCheck = segments.length > 0 ? segments : [command];
+    // Normalize unicode lookalike whitespace (e.g. non-breaking space)
+    // to plain spaces before any splitting/matching, so incidental or
+    // deliberate use of such characters can't silently break \s-based
+    // pattern matching. Fixed in the fix-pass (was a real, confirmed
+    // bug; see evals/results/VERDICT.md).
+    const normalizedCommand = normalizeWhitespace(command);
+    const segments = splitCommand(normalizedCommand);
+    const segmentsToCheck = segments.length > 0 ? segments : [normalizedCommand];
+
+    // Run the lightweight command-structure pass on each segment: for a
+    // read-only command (grep, cat, echo, etc.) whose risky-looking text
+    // is only in its arguments — not a chained/piped real invocation —
+    // only the harmless head-command text is exposed to pattern matching.
+    // This is what lets `grep "DROP TABLE" schema.sql` and
+    // `echo "never git push"` correctly fall through as allow, while a
+    // real `git push` or a `eval "git push"`/`... | bash` still gets the
+    // full text inspected. See docs/DESIGN.md for the tokenizer's scope
+    // and limits — it's a heuristic, not a full shell parser.
+    const textsToMatch = segmentsToCheck.map((seg) => classifySegment(seg).textForMatching);
 
     const guardedRules = rules.filter((r) => r.guard);
     const risky = getRiskyCommands(cwd);
 
-    for (const segment of segmentsToCheck) {
+    for (const text of textsToMatch) {
       for (const rule of guardedRules) {
         let re;
         try {
@@ -55,7 +73,7 @@ function decide(command, cwd) {
         } catch (_err) {
           continue; // bad pattern in user's own file: skip it, don't crash
         }
-        if (re.test(segment)) {
+        if (re.test(text)) {
           return {
             decision: 'deny',
             reason: `Blocked by project rule: "${rule.text}"`,
@@ -64,9 +82,9 @@ function decide(command, cwd) {
       }
     }
 
-    for (const segment of segmentsToCheck) {
+    for (const text of textsToMatch) {
       for (const entry of risky) {
-        if (entry.re.test(segment)) {
+        if (entry.re.test(text)) {
           const ruleList =
             rules.length > 0
               ? rules.map((r) => `- ${r.text}`).join('\n')
