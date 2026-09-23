@@ -141,6 +141,17 @@ function findAndParseRules(cwd) {
 function guardPatternToRegExp(pattern) {
   const escaped = pattern
     .split('*')
+    // Trim each segment before escaping: a pattern like "rm * migrations/*"
+    // has a leading space on " migrations/" purely to separate it from the
+    // '*' in the source text — that space is already implied by the
+    // wildcard's own '.*' (which can match zero-or-more characters,
+    // including a space or nothing at all). Without trimming, that literal
+    // leading/trailing space becomes an ADDITIONAL mandatory \s+ requirement
+    // stacked next to the wildcard, so "rm migrations/x" (no flags, just
+    // one space between "rm" and "migrations/") fails to match because the
+    // regex demands two separate whitespace gaps. This was a real,
+    // confirmed bug (see PROGRESS.md fix-pass Phase 3).
+    .map((part) => part.trim())
     .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
     // Collapse runs of literal whitespace into a class that tolerates
     // incidental spacing variations: repeated/tab/newline whitespace
