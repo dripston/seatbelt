@@ -24,7 +24,8 @@ const BUILTIN_RISKY = [
 function loadConfiguredRisky(cwd) {
   const fs = require('fs');
   const path = require('path');
-  const configPath = path.join(cwd, 'rule-guard.config.json');
+  const { normalizeCwd } = require('./lib/parse-rules');
+  const configPath = path.join(normalizeCwd(cwd), 'rule-guard.config.json');
   try {
     if (!fs.existsSync(configPath)) return null;
     const raw = fs.readFileSync(configPath, 'utf8');

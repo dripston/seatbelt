@@ -1,6 +1,15 @@
 # Progress: seatbelt build
 
-## Status: build complete (9 phases); rigorous eval rebuild complete (5 phases) — VERDICT: NOT YET READY TO SHIP
+## Status: build complete (9 phases); eval rebuild complete (5 phases, verdict: not ready); fix pass in progress
+
+## Fix pass: phase-by-phase (this section updated as each phase completes)
+
+| Phase | Status | Dangerous recall | Safe FPR | Near-miss FPR | Deny precision | Latency p95 | Notes |
+|---|---|---|---|---|---|---|---|
+| Baseline (post eval-rebuild, pre-fix) | — | 65.6% | 0.0% | 47.5% | 85.0% | ~130ms | From evals/results/VERDICT.md |
+| 0. Windows path bug | Done | 65.6% | 0.0% | 47.5% | 85.0% (unchanged — targets a path not exercised by the dataset) | ~130ms | See docs/HOOK_INPUT_EVIDENCE.md: captured 4 real hook-input samples from a live session. **Finding: Claude Code always sends `cwd` in native Windows format (`D:\\skill`), even inside Git Bash where the shell itself uses POSIX-style paths.** The POSIX-path bug in `findAndParseRules`/`loadConfiguredRisky` is real but NOT reachable via real Claude Code hook input in this configuration. Hardened defensively anyway: added `normalizeCwd()` in scripts/lib/parse-rules.js, converting Git-Bash/MSYS-style mount paths (`/d/foo`) to native Windows form (`D:\foo`) on win32 before any `path.join` call, wired into both `findAndParseRules` and `loadConfiguredRisky`. Added a startup sanity-check warning to stderr when a CLAUDE.md/AGENTS.md file exists but no critical block was recognized in it (silent no-op is the worst failure mode). 10 new unit tests in tests/normalize-cwd.test.js, covering `/d/foo`, `D:\foo`, `D:/foo`, UNC paths, relative paths, and an end-to-end POSIX-cwd rule-discovery case — all confirmed passing against the fix (44/44 total unit tests pass). Full eval re-run: numbers unchanged from baseline, as expected, since no dataset row exercises this code path — confirms no regression. |
+
+## Original status: build complete (9 phases); eval rebuild complete (5 phases) — VERDICT: NOT YET READY TO SHIP
 
 A second, independent evaluation effort (evals/TARGETS.md through evals/results/VERDICT.md) was run after the initial build because the original Phase 7 integration evals were circular: every scenario was written from the design spec, so passing proved the code matched its own spec, not that it behaves well on real-world input. The rebuilt eval used a 388-row dataset labeled from human judgment (blind to the implementation where practically possible), including real commands from actual shell history, and produced an honest, unflattering result: **3 of 4 committed targets were missed**. Full detail: [evals/results/VERDICT.md](evals/results/VERDICT.md).
 
