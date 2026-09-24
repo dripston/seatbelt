@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 'use strict';
 
-// Adherence harness: the only eval that matters for seatbelt v2. Every
-// prior eval (see archive/enforcement) measured command classification,
-// a product that no longer exists. This measures the one claim v2 makes:
-// re-injected rules get followed at context depth where they'd otherwise
-// decay.
+// Adherence harness v2 — rebuilt after the first run's rule set measured
+// nothing (2 of 3 rules held 100% regardless of seatbelt, one failed 0%
+// regardless of seatbelt; see evals/adherence/RESULTS.md for the full
+// post-mortem). This version uses 4 arbitrary rules with no natural pull
+// either way (rules.js), verified to hold at ~45k-token depth (turn one)
+// before this run, and issues multiple generic probes per checkpoint
+// (probes.js) so a single miss isn't noise — each probe's response is
+// checked against all 4 rules at once, since the rules apply to any
+// response regardless of topic.
 //
-// Method: create a headless session (fixed --session-id) inside a test
-// project with a CLAUDE.md containing 3 mechanically-checkable rules.
-// Pad the transcript with realistic, topically-unrelated work turns via
-// `claude -p --resume`. At each depth checkpoint, issue a probe prompt
-// per rule and check the response text against that rule's `check()`.
-// Run the whole sequence twice: once with the seatbelt plugin enabled,
-// once disabled (`claude plugin disable/enable seatbelt`).
+// Method: same as before — a headless session (`claude -p`, then
+// `--resume`), padded to depth checkpoints, run twice (seatbelt-disabled,
+// seatbelt-enabled), same prompts and same order in both arms.
 //
 // Cost/time note: each padding turn costs real API usage and ~10-90s of
-// wall time. This is run deliberately, not in CI, and not on every
-// commit.
+// wall time; this run issues 4 probes per checkpoint instead of 1 (one
+// per rule as before is now one per PROBE, all 4 rules checked against
+// each), so total cost/time is roughly proportional. Run deliberately,
+// not in CI.
 
 const { execSync } = require('child_process');
 const fs = require('fs');
@@ -26,6 +28,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const { RULES } = require('./rules');
+const { PROBES } = require('./probes');
 const { paddingPrompt } = require('./padding-prompts');
 
 const CHECKPOINTS = [25000, 50000, 100000, 150000, 200000];
@@ -45,9 +48,6 @@ function mkTestProject() {
 }
 
 function cmdQuote(arg) {
-  // Windows cmd.exe quoting: wrap in double quotes, escape embedded
-  // double quotes by doubling them. Sufficient for the plain-text
-  // prompts and UUIDs this harness passes (no embedded % or ^).
   return `"${String(arg).replace(/"/g, '""')}"`;
 }
 
@@ -68,13 +68,10 @@ function estimatedDepthTokens(result) {
 
 // sessionState tracks whether --session-id (first turn ever) or --resume
 // (every turn after) is correct, and the last known depth, across calls
-// spanning multiple checkpoints within the same condition. Passing this
-// as a mutable object (rather than re-deriving "started?" from a
-// locally-scoped lastResult) is what fixes a real bug found while
-// running this for real: re-calling runPaddingUntil per checkpoint with
-// a fresh local lastResult=null wrongly re-issued --session-id on a
-// session that already existed past checkpoint 1, which Claude Code
-// correctly rejects ("Session ID ... is already in use").
+// spanning multiple checkpoints within the same condition. A real bug
+// found in the first run: re-deriving "started?" from a locally-scoped
+// variable reset on every call wrongly re-issued --session-id on an
+// already-started session past the first checkpoint.
 function runPaddingUntil(sessionId, cwd, targetTokens, log, paddingIndexRef, sessionState) {
   let attempts = 0;
   const MAX_ATTEMPTS = 12; // safety valve: never loop forever if growth stalls
@@ -92,54 +89,102 @@ function runPaddingUntil(sessionId, cwd, targetTokens, log, paddingIndexRef, ses
   return sessionState.lastTokens;
 }
 
-function probe(sessionId, cwd, rule) {
-  const result = claudeCall(
-    ['-p', rule.probePrompt, '--resume', sessionId, '--output-format', 'json'],
-    cwd
-  );
+// Issues one probe and checks its single response against every rule.
+// Rules that return null (not applicable to this response, e.g.
+// tmp-prefix-vars on a prose-only response) are recorded as
+// applicable=false and excluded from adherence-rate math, not counted
+// as either a pass or a fail.
+function probeAllRules(sessionId, cwd, probeText) {
+  const result = claudeCall(['-p', probeText, '--resume', sessionId, '--output-format', 'json'], cwd);
   const responseText = result.result || '';
-  const adhered = rule.check(responseText);
-  return { adhered, responseText, tokensAtProbe: estimatedDepthTokens(result) };
+  const tokensAtProbe = estimatedDepthTokens(result);
+  const perRule = RULES.map((rule) => {
+    const verdict = rule.check(responseText);
+    return { ruleId: rule.id, applicable: verdict !== null, adhered: verdict === true };
+  });
+  return { responseText, tokensAtProbe, perRule };
 }
 
 function setPluginEnabled(enabled) {
   try {
     execSync(`claude.cmd plugin ${enabled ? 'enable' : 'disable'} seatbelt`, { encoding: 'utf8' });
   } catch (err) {
-    // "already enabled"/"already disabled" is a no-op we want to ignore;
-    // anything else should surface.
     const output = (err.stdout || '') + (err.stderr || '');
     if (!/already (enabled|disabled)/i.test(output)) throw err;
   }
 }
 
-function runCondition(conditionLabel, seatbeltEnabled, log) {
+// Reads whatever rows already exist for a condition (e.g. from a prior
+// run interrupted by a rate limit) so a resumed run can skip completed
+// checkpoints/probes instead of re-spending API calls and re-appending
+// duplicate rows. Returns { doneCheckpoints: Set<number>, cwd, sessionId,
+// sessionState } or null if nothing usable is on disk for this condition.
+function loadResumeState(conditionLabel) {
+  if (!fs.existsSync(RAW_OUTPUT_PATH)) return null;
+  const lines = fs.readFileSync(RAW_OUTPUT_PATH, 'utf8').trim();
+  if (!lines) return null;
+  const rows = lines.split('\n').map((l) => JSON.parse(l));
+  const conditionRows = rows.filter((r) => r.condition === conditionLabel);
+  if (conditionRows.length === 0) return null;
+
+  const byCheckpoint = new Map();
+  for (const r of conditionRows) {
+    if (!byCheckpoint.has(r.checkpoint)) byCheckpoint.set(r.checkpoint, new Set());
+    byCheckpoint.get(r.checkpoint).add(r.probeIndex);
+  }
+  const doneCheckpoints = new Set();
+  for (const cp of CHECKPOINTS) {
+    const probesDone = byCheckpoint.get(cp);
+    if (probesDone && probesDone.size === PROBES.length) doneCheckpoints.add(cp);
+  }
+
+  // Session/cwd are the same across all rows for a condition (one
+  // session per condition) - but rows don't carry them directly, so
+  // this relies on the log file, not the JSONL, for those two fields.
+  // Callers pass sessionId/cwd in explicitly when resuming; this
+  // function only tells the caller which checkpoints to skip and what
+  // the last known depth was.
+  const lastRow = conditionRows[conditionRows.length - 1];
+  return { doneCheckpoints, lastKnownDepth: lastRow.actualDepthAtPadding };
+}
+
+function runCondition(conditionLabel, seatbeltEnabled, log, resumeInfo) {
   setPluginEnabled(seatbeltEnabled);
-  const cwd = mkTestProject();
-  const sessionId = crypto.randomUUID();
+  const cwd = (resumeInfo && resumeInfo.cwd) || mkTestProject();
+  const sessionId = (resumeInfo && resumeInfo.sessionId) || crypto.randomUUID();
   const paddingIndexRef = { i: 0 };
-  const sessionState = { started: false, lastTokens: 0 };
+  const sessionState = resumeInfo
+    ? { started: true, lastTokens: resumeInfo.lastKnownDepth }
+    : { started: false, lastTokens: 0 };
+  const doneCheckpoints = (resumeInfo && resumeInfo.doneCheckpoints) || new Set();
   const rows = [];
 
   log(`\n=== Condition: ${conditionLabel} (seatbelt ${seatbeltEnabled ? 'enabled' : 'disabled'}) ===`);
   log(`Test project: ${cwd}`);
   log(`Session: ${sessionId}`);
+  if (resumeInfo) log(`Resuming: skipping already-complete checkpoints [${[...doneCheckpoints].join(', ')}]`);
 
   for (const checkpoint of CHECKPOINTS) {
+    if (doneCheckpoints.has(checkpoint)) {
+      log(`\n-- Checkpoint: ${checkpoint} tokens (already complete, skipping) --`);
+      continue;
+    }
     log(`\n-- Checkpoint: ${checkpoint} tokens --`);
     const actualDepth = runPaddingUntil(sessionId, cwd, checkpoint, log, paddingIndexRef, sessionState);
 
-    for (const rule of RULES) {
-      const { adhered, responseText, tokensAtProbe } = probe(sessionId, cwd, rule);
-      log(`  [${rule.id}] adhered=${adhered} (probed at ~${tokensAtProbe} tokens)`);
+    for (let probeIndex = 0; probeIndex < PROBES.length; probeIndex++) {
+      const probeText = PROBES[probeIndex];
+      const { responseText, tokensAtProbe, perRule } = probeAllRules(sessionId, cwd, probeText);
+      log(`  probe ${probeIndex} (~${tokensAtProbe} tokens): ${perRule.map((r) => `${r.ruleId}=${r.applicable ? r.adhered : 'n/a'}`).join(' ')}`);
       const row = {
         condition: conditionLabel,
         seatbeltEnabled,
         checkpoint,
         actualDepthAtPadding: actualDepth,
+        probeIndex,
+        probeText,
         tokensAtProbe,
-        ruleId: rule.id,
-        adhered,
+        perRule,
         responseText,
       };
       rows.push(row);
@@ -151,19 +196,65 @@ function runCondition(conditionLabel, seatbeltEnabled, log) {
 }
 
 function main() {
+  const args = process.argv.slice(2);
+  const resumeFlagIndex = args.indexOf('--resume-condition');
+  const resumeConditionArg = resumeFlagIndex >= 0 ? args[resumeFlagIndex + 1] : null;
+  const resumeSessionIndex = args.indexOf('--resume-session');
+  const resumeSessionArg = resumeSessionIndex >= 0 ? args[resumeSessionIndex + 1] : null;
+  const resumeCwdIndex = args.indexOf('--resume-cwd');
+  const resumeCwdArg = resumeCwdIndex >= 0 ? args[resumeCwdIndex + 1] : null;
+
   fs.mkdirSync(path.dirname(RAW_OUTPUT_PATH), { recursive: true });
-  fs.writeFileSync(RAW_OUTPUT_PATH, ''); // fresh file each run
   const log = (msg) => process.stdout.write(msg + '\n');
 
-  log('seatbelt adherence harness starting.');
+  if (resumeConditionArg) {
+    // Resuming a prior interrupted run (e.g. hit a rate limit mid-condition):
+    // do NOT truncate the existing raw output, and only run the named
+    // condition plus whatever condition(s) come after it in sequence.
+    log(`seatbelt adherence harness v2 RESUMING from condition "${resumeConditionArg}".`);
+    const conditions = [
+      ['seatbelt-disabled', false],
+      ['seatbelt-enabled', true],
+    ];
+    const startIndex = conditions.findIndex(([label]) => label === resumeConditionArg);
+    if (startIndex === -1) {
+      log(`Unknown condition "${resumeConditionArg}". Expected one of: ${conditions.map((c) => c[0]).join(', ')}`);
+      process.exit(1);
+    }
+    const resumeInfoForFirst = loadResumeState(resumeConditionArg);
+    if (!resumeInfoForFirst) {
+      log(`No existing rows found for condition "${resumeConditionArg}" - nothing to resume, run without --resume-condition instead.`);
+      process.exit(1);
+    }
+    if (!resumeSessionArg || !resumeCwdArg) {
+      log('Resuming requires --resume-session <uuid> --resume-cwd <path> (read from the interrupted run\'s log file).');
+      process.exit(1);
+    }
+    resumeInfoForFirst.sessionId = resumeSessionArg;
+    resumeInfoForFirst.cwd = resumeCwdArg;
+
+    const allRows = [];
+    for (let i = startIndex; i < conditions.length; i++) {
+      const [label, enabled] = conditions[i];
+      const info = i === startIndex ? resumeInfoForFirst : null;
+      allRows.push(...runCondition(label, enabled, log, info));
+    }
+    setPluginEnabled(true);
+    log('\nDone (resumed run). Total new rows this invocation: ' + allRows.length);
+    return;
+  }
+
+  fs.writeFileSync(RAW_OUTPUT_PATH, ''); // fresh file for a normal (non-resume) run
+
+  log('seatbelt adherence harness v2 starting.');
   log(`Checkpoints: ${CHECKPOINTS.join(', ')}`);
   log(`Rules: ${RULES.map((r) => r.id).join(', ')}`);
+  log(`Probes per checkpoint: ${PROBES.length}`);
 
-  const disabledRows = runCondition('seatbelt-disabled', false, log);
-  const enabledRows = runCondition('seatbelt-enabled', true, log);
+  const disabledRows = runCondition('seatbelt-disabled', false, log, null);
+  const enabledRows = runCondition('seatbelt-enabled', true, log, null);
 
-  // Restore to enabled at the end (the normal installed state).
-  setPluginEnabled(true);
+  setPluginEnabled(true); // restore normal installed state
 
   log('\nDone. Raw rows written to ' + RAW_OUTPUT_PATH);
   log(`Total rows: ${disabledRows.length + enabledRows.length}`);
