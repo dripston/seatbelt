@@ -1,8 +1,25 @@
 # Progress: seatbelt build
 
-## Status: round 2 of structural detection complete — blind recall is NON-MONOTONIC (12% -> 60% -> 40%), ceiling stated in README, no round 3 planned
+## Status: v2 pivot — enforcement stripped, seatbelt is re-injection only
 
-**Most recent, most important finding**: round 2 (a reversibility/consequence axis + verb-family expansion + morphology/non-POSIX-syntax parsing, built specifically to close round 1's generalization gap) improved round 1's burned holdout2 from 60.0% to 68.0% dangerous recall — but a FRESH, independently-built third holdout (embedded/firmware tools, HPC schedulers, network-device CLIs, ERP/mainframe tooling — ecosystems neither round had touched) scored only 40.0%, LOWER than round 1's own blind result. Near-miss precision remains excellent and stable at 100.0% across both round-1 and round-2 blind tests. Full diagnosis of every miss, with root causes confirmed by direct code inspection (not guessed): [evals/results/VERDICT-4.md](evals/results/VERDICT-4.md). README rewritten to lead with this non-monotonic finding and state a ceiling rather than a target — per this task's own decision rule, two rounds without a stable upward trend is evidence of diminishing/unpredictable returns, not grounds for a third round.
+**Product decision (2026-09-24)**: after two rounds of structural detection work produced non-monotonic, ecosystem-dependent blind recall (12% -> 60% -> 40%, see the archived history below), the enforcement side of seatbelt is cut. seatbelt no longer tries to detect or classify dangerous commands. Its only remaining job: keep the user's own CLAUDE.md/AGENTS.md rules alive in context across compaction, resume, and context depth. Full reasoning and the complete numbers table: [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md).
+
+All removed code (PreToolUse hook, tokenizer, risky-command list, structural detector, reversibility axis, all eval/dataset tooling) is preserved on branch `archive/enforcement`, branched from commit `4e4f810`. Nothing was deleted from history.
+
+### v2 Phase 1: Archive and strip
+
+- Created `archive/enforcement` from HEAD (`4e4f810`) before removing anything.
+- Removed from `main`: `scripts/pre-bash.js`, `scripts/risky-commands.js`, `scripts/lib/assess-reversibility.js`, `scripts/lib/split-command.js`, `scripts/lib/tokenize-command.js`, `scripts/lib/structural-danger.js`, their 4 test files, the entire `evals/` tree, and the `PreToolUse` entry in `hooks/hooks.json`. Confirmed via grep that nothing outside the enforcement path referenced `split-command`/`tokenize-command` before removing them.
+- Kept: `scripts/lib/parse-rules.js`, `scripts/session-start.js`, `skills/rule-guard/`, plugin packaging.
+- Cleared the stale local dev-only `PreToolUse` registration in `.claude/settings.json` (pointed at the now-removed `pre-bash.js`).
+- Wrote `docs/ARCHITECTURE_DECISION.md` with the full numbers table and per-miss diagnosis pointer.
+- Gate met: `node --test tests/*.test.js` → 30/30 passing (down from 256, expected — all removed tests were enforcement-only), `session-start.js` loads cleanly, `hooks/hooks.json` has only `SessionStart`.
+
+---
+
+## Status (superseded): round 2 of structural detection complete — blind recall is NON-MONOTONIC (12% -> 60% -> 40%), ceiling stated in README, no round 3 planned
+
+**Most recent, most important finding**: round 2 (a reversibility/consequence axis + verb-family expansion + morphology/non-POSIX-syntax parsing, built specifically to close round 1's generalization gap) improved round 1's burned holdout2 from 60.0% to 68.0% dangerous recall — but a FRESH, independently-built third holdout (embedded/firmware tools, HPC schedulers, network-device CLIs, ERP/mainframe tooling — ecosystems neither round had touched) scored only 40.0%, LOWER than round 1's own blind result. Near-miss precision remains excellent and stable at 100.0% across both round-1 and round-2 blind tests. Full diagnosis of every miss, with root causes confirmed by direct code inspection (not guessed): preserved on `archive/enforcement` at `evals/results/VERDICT-4.md`. This finding is what motivated the v2 pivot above.
 
 ### Prior status (round 1, superseded by the finding above but still accurate for what it measured)
 
