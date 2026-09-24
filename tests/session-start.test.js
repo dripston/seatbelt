@@ -25,7 +25,7 @@ test('source=compact with critical rules: emits context', () => {
   const dir = mkProjectWithCritical('- Never git push without asking. [guard: git push]');
   const context = buildContext('compact', dir);
   assert.ok(context);
-  assert.match(context, /Critical project rules/);
+  assert.match(context, /Project rules from CLAUDE\.md/);
   assert.match(context, /Never git push without asking/);
 });
 
@@ -48,17 +48,17 @@ test('source=clear: no injection (out of scope for v1)', () => {
   assert.equal(context, null);
 });
 
-test('no critical block exists: emits nothing even on compact', () => {
+test('no rules file at all: emits nothing even on compact', () => {
   const dir = mkEmptyProject();
   const context = buildContext('compact', dir);
   assert.equal(context, null);
 });
 
-test('malformed CLAUDE.md does not crash, emits nothing', () => {
+test('malformed CLAUDE.md does not crash; auto mode injects the file whole since it fits the token budget', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rule-guard-session-malformed-'));
   fs.writeFileSync(path.join(dir, 'CLAUDE.md'), '<!-- rule-guard:critical -->\nno closing tag');
   assert.doesNotThrow(() => {
     const context = buildContext('compact', dir);
-    assert.equal(context, null);
+    assert.match(context, /no closing tag/);
   });
 });

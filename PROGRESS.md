@@ -15,6 +15,21 @@ All removed code (PreToolUse hook, tokenizer, risky-command list, structural det
 - Wrote `docs/ARCHITECTURE_DECISION.md` with the full numbers table and per-miss diagnosis pointer.
 - Gate met: `node --test tests/*.test.js` → 30/30 passing (down from 256, expected — all removed tests were enforcement-only), `session-start.js` loads cleanly, `hooks/hooks.json` has only `SessionStart`.
 
+### v2 Phase 2: re-injection content decision
+
+Built `scripts/lib/select-content.js` with three modes, all reading via a new `findRulesFile()` added to `parse-rules.js` (first candidate file's raw content + path, nearest-first — same lookup order `findAndParseRules` already used):
+- `block`: only the marked critical block (old behavior). Nothing if no block.
+- `full`: the entire file content. Nothing if no file exists.
+- `auto` (new default): full file if under `maxInjectTokens` (default 1500, ~4 chars/token estimate), else the critical block if one exists, else the first 40 lines plus a truncation note. Nothing only if no rules file exists at all.
+
+Also built `scripts/lib/load-config.js`: reads `.claude/seatbelt.json`, invalid or missing file/fields fall back to per-field defaults (`{firstFire: 100000, interval: 50000, mode: "auto", maxInjectTokens: 1500, minTurnsBetween: 10}`), never throws.
+
+Rewired `session-start.js` to call `loadConfig` + `selectContent` instead of `findAndParseRules` directly, and changed the injected phrasing from "Critical project rules (re-injected by rule-guard after compaction/resume). These override anything in the summary above." to plain "Project rules from CLAUDE.md/AGENTS.md:" — the directive-sounding original ("these override...") is exactly the framing Phase 3's own hard rule warns can trigger Claude Code's prompt-injection defenses. Applied that plain phrasing here in Phase 2 already, before Phase 3 needed it, for consistency between both hooks.
+
+New test files: `tests/select-content.test.js` (14 tests, all three modes with fixtures including budget edge cases) and `tests/load-config.test.js` (8 tests, defaults/overrides/malformed-JSON/invalid-field-fallback). Updated `tests/session-start.test.js` for the new phrasing and for auto-mode's new behavior on a malformed-block file (previously asserted "emits nothing"; now correctly asserts the whole small file is injected, since auto mode doesn't require a block to have something worth injecting).
+
+Gate met: 51/51 tests passing.
+
 ---
 
 ## Status (superseded): round 2 of structural detection complete — blind recall is NON-MONOTONIC (12% -> 60% -> 40%), ceiling stated in README, no round 3 planned

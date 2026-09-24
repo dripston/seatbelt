@@ -168,9 +168,32 @@ function guardPatternToRegExp(pattern) {
   return new RegExp(escaped, 'is');
 }
 
+/**
+ * Finds the first candidate rules file under cwd (CLAUDE.md, then
+ * .claude/CLAUDE.md, then AGENTS.md) and returns its raw content and
+ * absolute path, or null if none exist. Used by content-mode selection
+ * (scripts/lib/select-content.js), which needs the whole file, not just
+ * the parsed critical block. Never throws.
+ */
+function findRulesFile(cwd) {
+  const normalizedCwd = normalizeCwd(cwd);
+  try {
+    for (const rel of CANDIDATE_FILES) {
+      const abs = path.join(normalizedCwd, rel);
+      if (!fs.existsSync(abs)) continue;
+      const content = readFileSafe(abs);
+      if (content) return { path: abs, content };
+    }
+  } catch (_err) {
+    return null;
+  }
+  return null;
+}
+
 module.exports = {
   parseBlocksFromContent,
   findAndParseRules,
+  findRulesFile,
   guardPatternToRegExp,
   normalizeCwd,
   CANDIDATE_FILES,

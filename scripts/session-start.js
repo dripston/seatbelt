@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-const { findAndParseRules } = require('./lib/parse-rules');
+const { selectContent } = require('./lib/select-content');
+const { loadConfig } = require('./lib/load-config');
 
 // Per DESIGN.md: only re-inject on compact/resume, not plain "startup"
 // (rules are already fresh at cold start, so injecting there would just
@@ -24,23 +25,14 @@ function noOutput() {
   process.exit(0);
 }
 
-function emitContext(rules) {
-  const ruleLines = rules.map((r) => `- ${r.text}`).join('\n');
-  const additionalContext = [
-    'Critical project rules (re-injected by rule-guard after compaction/resume).',
-    'These override anything in the summary above.',
-    '',
-    ruleLines,
-  ].join('\n');
-
-  const output = {
-    hookSpecificOutput: {
-      hookEventName: 'SessionStart',
-    },
-    additionalContext,
-  };
-  process.stdout.write(JSON.stringify(output));
-  process.exit(0);
+// Plain project information, not a directive envelope: Claude Code's
+// prompt-injection defenses can flag hook text framed as an out-of-band
+// system command ("SYSTEM:", "you must", "IMPORTANT INSTRUCTION"), which
+// surfaces the text to the user as a warning instead of using it as
+// context. This phrasing was tested and does not trigger that warning —
+// see docs/DESIGN.md.
+function formatContext(text) {
+  return ['Project rules from CLAUDE.md/AGENTS.md:', '', text].join('\n');
 }
 
 /**
@@ -51,15 +43,10 @@ function emitContext(rules) {
 function buildContext(source, cwd) {
   try {
     if (!TRIGGER_SOURCES.has(source)) return null;
-    const { rules } = findAndParseRules(cwd);
-    if (rules.length === 0) return null;
-    const ruleLines = rules.map((r) => `- ${r.text}`).join('\n');
-    return [
-      'Critical project rules (re-injected by rule-guard after compaction/resume).',
-      'These override anything in the summary above.',
-      '',
-      ruleLines,
-    ].join('\n');
+    const config = loadConfig(cwd);
+    const { text } = selectContent(cwd, config.mode, config.maxInjectTokens);
+    if (!text) return null;
+    return formatContext(text);
   } catch (_err) {
     try {
       process.stderr.write(`rule-guard session-start: internal error, emitting nothing: ${_err && _err.message}\n`);
@@ -85,8 +72,14 @@ async function main() {
   const context = buildContext(source, cwd);
   if (!context) return noOutput();
 
-  const { rules } = findAndParseRules(cwd);
-  emitContext(rules);
+  const output = {
+    hookSpecificOutput: {
+      hookEventName: 'SessionStart',
+    },
+    additionalContext: context,
+  };
+  process.stdout.write(JSON.stringify(output));
+  process.exit(0);
 }
 
 if (require.main === module) {
