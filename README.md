@@ -1,50 +1,76 @@
-# seatbelt
+<div align="center">
 
-**Problem:** Claude Code agents follow your CLAUDE.md/AGENTS.md rules at first, then silently drop them — after context compaction, on resume, or just from being deep in a long session.
+# 🪢 seatbelt
 
-**What seatbelt does:** keeps your rules alive in the agent's context across three triggers — compaction, resume, and context depth. It does not block or check anything. It reminds; it does not enforce.
+**Keep your CLAUDE.md rules alive — across compaction, resume, and long sessions.**
 
-## Why the scope changed
+[![version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-90%2F90%20passing-brightgreen)](tests/)
+[![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](docs/ARCHITECTURE_DECISION.md)
 
-seatbelt originally also tried to detect and block dangerous Bash commands (a `PreToolUse` hook with pattern-based and structural detection). Two rounds of real, tested work on that detector found its recall on tools it hadn't seen before was unstable and ecosystem-dependent — 12%, then 60%, then 40% across three independently-built blind tests, with false positives held at 0% throughout. That is not a stable foundation to ship a safety claim on. The enforcement code, its tests, and its full evaluation history are preserved on the `archive/enforcement` branch — nothing was deleted, just cut from what ships. Full reasoning and the numbers: [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md).
+</div>
+
+---
+
+Claude Code agents follow your `CLAUDE.md` / `AGENTS.md` rules at first, then silently drop them — after context compaction, on resume, or just from being deep in a long session. This is a real, documented gap ([issue evidence below](#the-problem-this-is-built-on)), not a guess.
+
+**seatbelt fixes the "silently drop" part.** It re-reads your rules and pushes them back into context at the three moments they're most likely to fall out. That's the whole product. It does not scan your commands, does not block anything, and does not try to guess what's dangerous.
+
+```
+                    ┌─────────────────────────────┐
+   compaction  ───▶ │                             │
+   resume      ───▶ │   your rules, re-injected   │ ───▶  agent sees them again
+   deep context ──▶ │                             │
+                    └─────────────────────────────┘
+```
 
 ## Install
 
 ```bash
-# Add this repo as a marketplace source, then install the plugin by name:
 claude plugin marketplace add dripston/seatbelt
 claude plugin install seatbelt
+```
 
-# Testing from a local clone instead of GitHub (must start with ./ or be absolute):
+Testing from a local clone instead of GitHub:
+
+```bash
 claude plugin marketplace add ./path/to/local/seatbelt
 claude plugin install seatbelt
 ```
 
-## Write your rules
+## Use it
 
-Add a critical block to `CLAUDE.md`, `.claude/CLAUDE.md`, or `AGENTS.md`:
+Just write your rules the way you already do — no special syntax required:
+
+```markdown
+<!-- CLAUDE.md -->
+- Never git push without asking me first.
+- Never delete files in migrations/.
+- Always run tests before committing.
+```
+
+seatbelt's default mode re-injects the whole file when it's small, so most projects need zero setup. If your `CLAUDE.md` is large and you only want specific lines kept alive, wrap them:
 
 ```markdown
 <!-- rule-guard:critical -->
 - Never git push without asking me first.
-- Never delete files in migrations/.
-- Always run tests before committing.
 <!-- /rule-guard:critical -->
 ```
 
-The marker is optional. If your file has no `<!-- rule-guard:critical -->` block, seatbelt's default (`auto`) mode re-injects the whole file when it's small enough, so you don't have to learn special syntax just to get the benefit. See "Configuration" below.
+## How it works
 
-## The three triggers
+| Trigger | Fires on | Why |
+|---|---|---|
+| **Compaction** | `SessionStart`, `source: compact` | Claude Code's own summarization can drop rules from the compacted context. |
+| **Resume** | `SessionStart`, `source: resume` | Same risk when picking a saved session back up. |
+| **Depth** | `UserPromptSubmit` | Even without compacting, a long session degrades adherence purely from context depth. seatbelt estimates transcript size and re-injects past a threshold — first at 100,000 tokens, then every 50,000 after — independent of compaction. |
 
-1. **Compaction** (`SessionStart`, `source: compact`) — when Claude Code compacts a long session, its own context-compression can drop your rules out of the summary. seatbelt re-reads your rules file and re-injects it right after.
-2. **Resume** (`SessionStart`, `source: resume`) — same re-injection when you resume a saved session.
-3. **Context depth** (`UserPromptSubmit`) — a session that never compacts can still lose rule adherence purely from being deep in context. seatbelt estimates the current transcript's token depth and re-injects once past a threshold (default: first at 100,000 tokens, then every 50,000 tokens after), independent of compaction. A floor of at least 10 turns between re-injections (configurable) keeps a token-estimation quirk from spamming your context.
-
-Where the depth defaults come from: measured rule-adherence degradation begins around 50K-100K tokens and worsens sharply near 50% of the model's context window (roughly 100K for Claude Code's ~200K window); an existing community context-refresh hook uses 90,000 as its threshold. 100,000 sits at the start of the degradation zone, before the steep part of the drop-off. Full reasoning: [docs/DESIGN.md](docs/DESIGN.md).
+The depth threshold isn't arbitrary: measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window. 100,000 sits right at the start of that zone. Full reasoning in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Configuration
 
-Optional `.claude/seatbelt.json` in your project:
+Optional, drop a `.claude/seatbelt.json` in your project — every field has a sane default, and a typo in one never breaks the rest:
 
 ```json
 {
@@ -56,40 +82,48 @@ Optional `.claude/seatbelt.json` in your project:
 }
 ```
 
-- `firstFire` / `interval`: token thresholds for the depth trigger (see above).
-- `mode`: what gets re-injected —
-  - `"auto"` (default): the whole rules file if it fits under `maxInjectTokens`, else the marked critical block if one exists, else the first 40 lines plus a truncation note.
-  - `"block"`: only the marked `<!-- rule-guard:critical -->` block. Nothing if no block exists.
-  - `"full"`: the entire rules file, regardless of size.
-- `maxInjectTokens`: the budget `auto` mode checks against (default 1500, estimated at ~4 characters per token).
-- `minTurnsBetween`: minimum turns between depth-triggered re-injections (default 10).
+| Field | Default | Meaning |
+|---|---|---|
+| `firstFire` | `100000` | Token depth for the first depth-triggered re-injection |
+| `interval` | `50000` | Tokens between subsequent re-injections |
+| `mode` | `"auto"` | `auto` = whole file if small, else the marked block, else first 40 lines · `block` = marked block only · `full` = always the whole file |
+| `maxInjectTokens` | `1500` | Size budget `auto` mode checks against |
+| `minTurnsBetween` | `10` | Minimum turns between depth-triggered fires, so a token-estimation quirk can't spam your context |
 
-Any missing or invalid field falls back to its default individually — a typo in one field doesn't break the rest of your config.
+## What seatbelt is *not*
 
-## What this does NOT do
+seatbelt used to also try blocking dangerous Bash commands. It doesn't anymore, and here's the honest reason why:
 
-- **Does not block commands.** There is no `PreToolUse` hook, no deny, no ask. If you need that, see "Why the scope changed" above and the archived branch — but read the numbers first.
-- **Does not detect dangerous operations.** seatbelt has no opinion on what's risky. It only keeps whatever you wrote alive in context.
-- **Does not replace your own judgment.** A rule that's present in context is a rule the model is more likely to follow, not a guarantee it will.
-- **Does not fix AGENTS.md truncation** on very long files ([openai/codex#13386](https://github.com/openai/codex/issues/13386)) — that's a model-context bug, not something a hook can patch.
-- **Adds a small, per-invocation cost.** Every `UserPromptSubmit` reads and size-checks the current transcript (bounded: exact read under 2MB, byte-size estimate above it) and every `SessionStart`/`SessionEnd` does a small filesystem read/write. This is much cheaper than the removed `PreToolUse` hook (which ran on every single Bash command), but it's not free.
+> Two rounds of real, blind-tested detection work found recall on unfamiliar tools was unstable and ecosystem-dependent — **12% → 60% → 40%** across three independent holdout tests, even while false positives stayed at 0%. That's not a foundation to ship a safety claim on, so it was cut. The code, tests, and full four-verdict eval history are preserved on [`archive/enforcement`](https://github.com/dripston/seatbelt/tree/archive/enforcement) — nothing deleted, just not shipped. Full numbers: [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md).
 
-## Measured: does re-injection actually help?
+So, plainly:
 
-A real headless adherence run (`evals/adherence/`) padded a session to 25K-200K tokens and probed 3 mechanically-checkable rules at each depth, with and without seatbelt. The result was a null result on the specific question of measurable improvement — but running it for real surfaced two genuine bugs (one, a wrong JSON nesting level in `session-start.js`, meant `SessionStart` re-injection had been a silent no-op in production before this was caught and fixed) and raised an open question about whether the harness's design (`--resume`-accumulated depth vs. a true `/compact` event) exercises the failure mode seatbelt targets. Full honest writeup, including what the run does and doesn't support: [evals/adherence/RESULTS.md](evals/adherence/RESULTS.md).
+- ❌ Does not block or check any command — no `PreToolUse` hook, no deny, no ask.
+- ❌ Does not detect "dangerous" anything — no opinion on command content at all.
+- ❌ Is not a substitute for your own judgment — a rule in context is more likely to be followed, not guaranteed to be.
+- ❌ Does not fix `AGENTS.md` truncation on very long files ([openai/codex#13386](https://github.com/openai/codex/issues/13386)) — that's a model-context bug.
+- ⚠️ Adds a small per-invocation cost (a bounded transcript size check per prompt, a small file read/write per session event) — far cheaper than the old per-command hook, but not free.
+
+## Does re-injection actually help? Here's the honest answer.
+
+Two real headless test runs measured this directly. Both came back **null results** — not because the mechanism failed, but because neither test's "seatbelt off" control arm ever showed rule decay in the first place, so there was nothing for re-injection to visibly fix. One run also caught and fixed a real shipped bug (`SessionStart`'s output had the wrong JSON shape, so it was a silent no-op) — found by tracing live hook output, not by unit tests.
+
+**This is stated plainly, not spun.** The mechanism is confirmed working end-to-end (live-traced against the real Claude Code hook contract). Whether it measurably moves adherence at depth is still an open question. Full data and reasoning: [evals/adherence/RESULTS.md](evals/adherence/RESULTS.md).
+
+## The problem this is built on
+
+Not a guess — a documented, still-open gap:
+
+- [anthropics/claude-code#92257](https://github.com/anthropics/claude-code/issues/92257) — re-injection feature request, 7 prior duplicate reports, plus a dose-response report of adherence decaying with raw context depth
+- [anthropics/claude-code#88565](https://github.com/anthropics/claude-code/issues/88565) — auto mode routes edits through Bash, bypassing rule injection
+- [anthropics/claude-code#81999](https://github.com/anthropics/claude-code/issues/81999) — agent breaks an explicit "every time, no exceptions" rule after a few cycles
+- [anthropics/claude-code#34197](https://github.com/anthropics/claude-code/issues/34197), [#43716](https://github.com/anthropics/claude-code/issues/43716) — CLAUDE.md ignored in long sessions
+
+Full log: [docs/EVIDENCE.md](docs/EVIDENCE.md)
 
 ## Prior art
 
-[Cozempic](https://github.com/Ruya-AI/cozempic) does `SessionStart`-hook-based rule-freshness reminders as part of a broader context-pruning tool. seatbelt is narrower and single-purpose: three re-injection triggers, no pruning, no other features.
-
-## Evidence for the underlying problem
-
-- [anthropics/claude-code#92257](https://github.com/anthropics/claude-code/issues/92257) — re-injection feature request, citing 7 prior duplicate reports, including a dose-response report showing adherence decaying continuously with context depth, independent of compaction
-- [anthropics/claude-code#88565](https://github.com/anthropics/claude-code/issues/88565) — auto mode routes edits through Bash, bypassing path-scoped rule injection
-- [anthropics/claude-code#81999](https://github.com/anthropics/claude-code/issues/81999) — agent ignores an explicit "every time, no exceptions" rule after a few approval cycles
-- [anthropics/claude-code#34197](https://github.com/anthropics/claude-code/issues/34197), [#43716](https://github.com/anthropics/claude-code/issues/43716) — CLAUDE.md ignored in long sessions
-
-Full evidence log: [docs/EVIDENCE.md](docs/EVIDENCE.md). Design rationale: [docs/DESIGN.md](docs/DESIGN.md).
+[Cozempic](https://github.com/Ruya-AI/cozempic) does similar `SessionStart` reminders as part of a broader context-pruning tool. seatbelt is narrower on purpose: three triggers, nothing else.
 
 ## Contributing
 
