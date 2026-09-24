@@ -6,9 +6,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
 
 const { decide } = require('../scripts/depth-check');
 const { clearState } = require('../scripts/lib/depth-state');
+
+const SCRIPT = path.join(__dirname, '..', 'scripts', 'depth-check.js');
 
 function freshSessionId() {
   return `test-${crypto.randomBytes(8).toString('hex')}`;
@@ -96,5 +99,40 @@ test('respects block mode from config', () => {
   const result = decide(sessionId, transcript, cwd);
   assert.match(result.context, /Only this rule/);
   assert.doesNotMatch(result.context, /unrelated prose/);
+  clearState(sessionId);
+});
+
+// Real, end-to-end schema check against Claude Code's actual hook
+// contract — see the matching test in session-start.test.js for why
+// this matters: a sibling hook (session-start.js) shipped with
+// additionalContext at the wrong nesting level for a long time before
+// a live headless debug trace caught it, and no unit test noticed
+// because none checked the real stdout JSON shape.
+test('end-to-end: emitted JSON nests additionalContext under hookSpecificOutput', () => {
+  const cwd = mkProjectWithRules();
+  const transcript = mkTranscriptOfTokens(120000);
+  const sessionId = freshSessionId();
+  const result = spawnSync('node', [SCRIPT], {
+    input: JSON.stringify({ session_id: sessionId, transcript_path: transcript, cwd }),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  assert.match(output.hookSpecificOutput.additionalContext, /Never git push without asking/);
+  assert.equal(output.additionalContext, undefined);
+  clearState(sessionId);
+});
+
+test('end-to-end: below threshold emits no stdout at all', () => {
+  const cwd = mkProjectWithRules();
+  const transcript = mkTranscriptOfTokens(50000);
+  const sessionId = freshSessionId();
+  const result = spawnSync('node', [SCRIPT], {
+    input: JSON.stringify({ session_id: sessionId, transcript_path: transcript, cwd }),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, '');
   clearState(sessionId);
 });

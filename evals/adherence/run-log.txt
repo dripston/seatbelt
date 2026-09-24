@@ -1,0 +1,118 @@
+seatbelt adherence harness starting.
+Checkpoints: 25000, 50000, 100000, 150000, 200000
+Rules: british-spelling, no-delve, summary-prefix
+✘ Failed to disable plugin "seatbelt": Plugin "seatbelt" is already disabled
+
+=== Condition: seatbelt-disabled (seatbelt disabled) ===
+Test project: C:\Users\rehaan\AppData\Local\Temp\seatbelt-adherence-run-1ezhu5
+Session: 606ceee3-d0de-475c-a6b6-6663c6837f12
+
+-- Checkpoint: 25000 tokens --
+  padding turn: 45010 tokens (target 25000), 30684ms, cost $0.1398
+  [british-spelling] adhered=true (probed at ~52630 tokens)
+  [no-delve] adhered=true (probed at ~52732 tokens)
+  [summary-prefix] adhered=false (probed at ~57340 tokens)
+
+-- Checkpoint: 50000 tokens --
+  padding turn: 121312 tokens (target 50000), 78745ms, cost $0.2343
+  [british-spelling] adhered=true (probed at ~68228 tokens)
+  [no-delve] adhered=true (probed at ~70289 tokens)
+  [summary-prefix] adhered=false (probed at ~71884 tokens)
+
+-- Checkpoint: 100000 tokens --
+  [british-spelling] adhered=true (probed at ~73195 tokens)
+  [no-delve] adhered=true (probed at ~73266 tokens)
+  [summary-prefix] adhered=false (probed at ~73827 tokens)
+
+-- Checkpoint: 150000 tokens --
+  padding turn: 74019 tokens (target 150000), 38919ms, cost $0.0624
+  padding turn: 76682 tokens (target 150000), 40248ms, cost $0.0829
+  padding turn: 79710 tokens (target 150000), 41020ms, cost $0.0908
+  padding turn: 83061 tokens (target 150000), 35104ms, cost $0.0919
+  padding turn: 86298 tokens (target 150000), 31918ms, cost $0.0794
+  padding turn: 88692 tokens (target 150000), 42987ms, cost $0.0883
+  padding turn: 91936 tokens (target 150000), 33194ms, cost $0.0819
+  padding turn: 94487 tokens (target 150000), 27011ms, cost $0.0765
+  padding turn: 96797 tokens (target 150000), 54085ms, cost $0.1024
+  padding turn: 100803 tokens (target 150000), 41051ms, cost $0.0994
+  padding turn: 103935 tokens (target 150000), 32798ms, cost $0.0871
+  padding turn: 106514 tokens (target 150000), 98694ms, cost $0.2080
+  [british-spelling] adhered=true (probed at ~117302 tokens)
+  [no-delve] adhered=true (probed at ~117457 tokens)
+  [summary-prefix] adhered=false (probed at ~118018 tokens)
+
+-- Checkpoint: 200000 tokens --
+  padding turn: 120100 tokens (target 200000), 24831ms, cost $0.5965
+  padding turn: 121498 tokens (target 200000), 42212ms, cost $0.0969
+  padding turn: 124610 tokens (target 200000), 34890ms, cost $0.1048
+  padding turn: 126788 tokens (target 200000), 42533ms, cost $0.1151
+  padding turn: 130843 tokens (target 200000), 37557ms, cost $0.1016
+  padding turn: 133505 tokens (target 200000), 47684ms, cost $0.1137
+  padding turn: 137462 tokens (target 200000), 23701ms, cost $0.0965
+  padding turn: 139685 tokens (target 200000), 38495ms, cost $0.1219
+  padding turn: 144228 tokens (target 200000), 28625ms, cost $0.1078
+  padding turn: 146859 tokens (target 200000), 31017ms, cost $0.1035
+  padding turn: 151775 tokens (target 200000), 34090ms, cost $0.2637
+  padding turn: 155009 tokens (target 200000), 28478ms, cost $0.1310
+  [british-spelling] adhered=true (probed at ~157827 tokens)
+  [no-delve] adhered=true (probed at ~161090 tokens)
+  [summary-prefix] adhered=false (probed at ~162298 tokens)
+
+=== Condition: seatbelt-enabled (seatbelt enabled) ===
+Test project: C:\Users\rehaan\AppData\Local\Temp\seatbelt-adherence-run-8JByEV
+Session: 2ecbbad2-8a72-41c1-9891-24a39cac2c7f
+
+-- Checkpoint: 25000 tokens --
+  padding turn: 45022 tokens (target 25000), 34618ms, cost $0.1425
+  [british-spelling] adhered=true (probed at ~52859 tokens)
+  [no-delve] adhered=true (probed at ~54921 tokens)
+  [summary-prefix] adhered=false (probed at ~55427 tokens)
+
+-- Checkpoint: 50000 tokens --
+  padding turn: 116222 tokens (target 50000), 77274ms, cost $0.1980
+  [british-spelling] adhered=true (probed at ~65235 tokens)
+  [no-delve] adhered=true (probed at ~65938 tokens)
+  [summary-prefix] adhered=false (probed at ~67927 tokens)
+
+-- Checkpoint: 100000 tokens --
+  [british-spelling] adhered=true (probed at ~68211 tokens)
+  [no-delve] adhered=true (probed at ~68319 tokens)
+  [summary-prefix] adhered=false (probed at ~68651 tokens)
+
+-- Checkpoint: 150000 tokens --
+  padding turn: 68834 tokens (target 150000), 45083ms, cost $0.0609
+  padding turn: 71503 tokens (target 150000), 43893ms, cost $0.0832
+  padding turn: 75147 tokens (target 150000), 49769ms, cost $0.0952
+  padding turn: 79810 tokens (target 150000), 42154ms, cost $0.1041
+  padding turn: 83949 tokens (target 150000), 35684ms, cost $0.0855
+  padding turn: 87213 tokens (target 150000), 40223ms, cost $0.0833
+  padding turn: 89844 tokens (target 150000), 35219ms, cost $0.0793
+  padding turn: 92097 tokens (target 150000), 32812ms, cost $0.0683
+  padding turn: 94021 tokens (target 150000), 54911ms, cost $0.0940
+  padding turn: 98316 tokens (target 150000), 44258ms, cost $0.0925
+  padding turn: 102232 tokens (target 150000), 34766ms, cost $0.0861
+  padding turn: 104721 tokens (target 150000), 63643ms, cost $0.5776
+  [british-spelling] adhered=true (probed at ~113941 tokens)
+  [no-delve] adhered=true (probed at ~114204 tokens)
+  [summary-prefix] adhered=false (probed at ~115212 tokens)
+
+-- Checkpoint: 200000 tokens --
+  padding turn: 116593 tokens (target 200000), 29952ms, cost $0.0633
+  padding turn: 118149 tokens (target 200000), 49290ms, cost $0.0912
+  padding turn: 121793 tokens (target 200000), 32666ms, cost $0.0836
+  padding turn: 123860 tokens (target 200000), 35203ms, cost $0.0954
+  padding turn: 126826 tokens (target 200000), 33920ms, cost $0.0867
+  padding turn: 129117 tokens (target 200000), 44136ms, cost $0.1034
+  padding turn: 132744 tokens (target 200000), 27980ms, cost $0.0959
+  padding turn: 136933 tokens (target 200000), 41730ms, cost $0.1207
+  padding turn: 141162 tokens (target 200000), 32609ms, cost $0.1159
+  padding turn: 144515 tokens (target 200000), 33521ms, cost $0.1072
+  padding turn: 148248 tokens (target 200000), 36798ms, cost $0.1208
+  padding turn: 153095 tokens (target 200000), 33577ms, cost $0.1180
+  [british-spelling] adhered=true (probed at ~157027 tokens)
+  [no-delve] adhered=true (probed at ~157205 tokens)
+  [summary-prefix] adhered=false (probed at ~160149 tokens)
+✘ Failed to enable plugin "seatbelt": Plugin "seatbelt" is already enabled
+
+Done. Raw rows written to D:\skill\evals\results\adherence-raw.jsonl
+Total rows: 30

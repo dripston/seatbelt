@@ -75,8 +75,8 @@ async function main() {
   const output = {
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
+      additionalContext: context,
     },
-    additionalContext: context,
   };
   process.stdout.write(JSON.stringify(output));
   process.exit(0);
