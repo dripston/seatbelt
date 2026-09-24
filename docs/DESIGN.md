@@ -59,3 +59,45 @@ One-line justification: PreToolUse hooks run synchronously in the user's interac
 ## Scope: Claude Code only for v1
 
 Cursor and Codex have different hook/rule mechanisms (confirmed different from Claude Code's documented hook system) — porting is a v2 concern, not v1.
+
+---
+
+## v2: depth-triggered re-injection (`UserPromptSubmit`)
+
+Addresses known limitation #1 above: a session that never compacts still loses rule adherence purely from context depth. `SessionStart` only fires on `compact`/`resume`, so a long uncompacted session was never covered. `scripts/depth-check.js`, registered on `UserPromptSubmit`, closes that gap.
+
+### Threshold basis
+
+Default `firstFire: 100000`, then every `interval: 50000` after. Reasoning (see docs/EVIDENCE.md for the underlying dose-response citation):
+- Measured rule-adherence degradation begins in the 50K-100K token range, with a stable region extending to roughly 40% of the model's max context and a sharp drop near 50%.
+- Claude Code's context window is roughly 200K tokens, so 40% is ~80K.
+- An existing community context-refresh hook (cited in docs/EVIDENCE.md, ~0.18% token overhead when threshold-gated) uses 90,000 as its fire point.
+- 100,000 sits at the start of the degradation zone and before the steep part of the drop-off — later than the community hook's 90K (erring toward fewer, more necessary injections) but still before the region where adherence measurably falls off a cliff.
+
+These are defaults, not claims of precision — `.claude/seatbelt.json`'s `firstFire`/`interval` let a project tune them.
+
+### Token estimation
+
+`scripts/lib/estimate-transcript-tokens.js`: ~4 chars/token, no dependencies. Below a 2MB file-size cutoff, reads and counts the transcript exactly; above it, estimates from file size alone (byte count is a fine proxy for JSONL text size when only a threshold crossing matters, not an exact figure). This keeps the added per-turn cost bounded even on a very long session's transcript.
+
+### Firing logic
+
+`scripts/lib/depth-decision.js`'s `shouldFire()`: fires once estimated tokens cross `firstFire` (if never fired this session), then again every `interval` tokens past the last fire point — not a fixed multiple of `firstFire`, so a config change or unusual growth pattern mid-session still behaves sensibly relative to when it last actually fired. A hard floor (`minTurnsBetween`, default 10) blocks any fire regardless of token math if fewer than that many turns have passed since the last fire, so an estimation bug or a pathological transcript-size jump can't spam re-injections.
+
+State (last-fired token count, turns since last fire) is tracked in a temp-dir file keyed by `session_id` (`scripts/lib/depth-state.js`), sanitized against path-traversal characters in the id. Best-effort only: a lost or corrupted state file degrades to "never fired" defaults, never a crash. `SessionEnd` (`scripts/session-end.js`) deletes the state file when practical; if it doesn't run (e.g. the process is killed), the file is small and harmless left behind in the OS temp dir.
+
+### Injection phrasing (tested)
+
+Claude Code's prompt-injection defenses can flag hook-injected text that reads as an out-of-band system command, surfacing it to the user as a warning instead of feeding it to the model as context. Both `session-start.js` and `depth-check.js` use the same plain phrasing:
+
+```
+Project rules from CLAUDE.md/AGENTS.md:
+
+<rule text or full file content>
+```
+
+Deliberately avoided: `SYSTEM:`, `You must`, `IMPORTANT INSTRUCTION`, or any directive-envelope framing. (The original `session-start.js` wording — "These override anything in the summary above." — was itself replaced during this pass for the same reason, even though it predates this hook.) Tested manually via a direct hook invocation with a real `UserPromptSubmit` payload; the emitted `additionalContext` was accepted without a surfaced injection warning.
+
+### Interaction with `--continue`/`--resume`
+
+On `--continue`/`--resume`, Claude Code replays saved `UserPromptSubmit` text from the prior session rather than re-running the hook for those past turns — so any depth-triggered injection captured in a replayed transcript is stale by the time it's replayed (it reflects token depth at the time it was first generated, not now). This is fine: `SessionStart`'s `resume` trigger already re-injects fresh rules at the moment a session resumes, covering exactly the case `--resume`/`--continue` creates. `depth-check.js` only needs to handle depth accumulated during the live portion of a session going forward from that point.

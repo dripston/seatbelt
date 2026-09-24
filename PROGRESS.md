@@ -30,6 +30,23 @@ New test files: `tests/select-content.test.js` (14 tests, all three modes with f
 
 Gate met: 51/51 tests passing.
 
+### v2 Phase 3: depth-triggered re-injection (`UserPromptSubmit`)
+
+New hook `scripts/depth-check.js`, registered on `UserPromptSubmit` in `hooks/hooks.json`, plus `scripts/session-end.js` (state cleanup) registered on `SessionEnd`. Addresses the long-known, previously-logged-but-unsolved limitation (docs/DESIGN.md #1, docs/EVIDENCE.md): a session that never compacts still loses rule adherence purely from context depth, and `SessionStart`'s `compact`/`resume`-only trigger never covers it.
+
+New library modules:
+- `scripts/lib/estimate-transcript-tokens.js`: ~4 chars/token, exact read under a 2MB cutoff, byte-size estimate above it (bounds the added per-turn cost on very long transcripts).
+- `scripts/lib/depth-decision.js`: pure `shouldFire()` — fires at `firstFire` tokens (first time), then every `interval` tokens past the last actual fire point (not a fixed multiple of `firstFire`), gated by a `minTurnsBetween` floor that blocks any fire regardless of token math.
+- `scripts/lib/depth-state.js`: per-`session_id` state file in the OS temp dir (last-fired tokens, turns since fire), sanitized against path-traversal characters in the id, best-effort read/write (corrupted or missing state degrades to "never fired" defaults, never a crash).
+
+Threshold defaults (`firstFire: 100000, interval: 50000, minTurnsBetween: 10`) and their justification (measured degradation zone starts 50-100K, stable region to ~40% of Claude Code's ~200K window, an existing community hook's 90K precedent) are recorded in docs/DESIGN.md's new "v2: depth-triggered re-injection" section, along with the tested injection phrasing and the `--continue`/`--resume` replay interaction (stale depth-injections in a replayed transcript are a non-issue because `SessionStart`'s `resume` trigger already re-injects fresh rules at the moment of resume).
+
+Injection phrasing changed to match session-start.js's plain "Project rules from CLAUDE.md/AGENTS.md:" framing (not a directive envelope), per this phase's explicit requirement that hook-injected text not read as an out-of-band system command.
+
+New tests: `tests/depth-decision.test.js` (12), `tests/estimate-transcript-tokens.test.js` (5), `tests/depth-state.test.js` (9), `tests/depth-check.test.js` (6), `tests/session-end.test.js` (3) — covering threshold edges, interval-relative-to-last-fire behavior, the turn floor, config parsing integration, path-traversal sanitization, corrupted/missing state, and fail-open on an unreadable transcript path. Manually verified end-to-end via direct stdin invocation: fires once at the threshold, does not re-fire on a second identical call, cleans up correctly via session-end.js.
+
+Gate met: 86/86 tests passing (up from 51).
+
 ---
 
 ## Status (superseded): round 2 of structural detection complete — blind recall is NON-MONOTONIC (12% -> 60% -> 40%), ceiling stated in README, no round 3 planned
