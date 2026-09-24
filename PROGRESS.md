@@ -61,6 +61,17 @@ Per this phase's own fallback instruction: this is not "headless mode can't supp
 
 Gate met (per the phase's own OR condition): real data collected, all 30 rows honest and unmodified; the run's limitations are documented plainly rather than hidden. 90/90 unit tests passing (up from 86, new end-to-end schema tests).
 
+### v2 Phase 5: repackage
+
+- **README.md** fully rewritten around the single claim: keeps rules alive across compaction, resume, and depth. States the three triggers with their basis, the config fields, and links `docs/ARCHITECTURE_DECISION.md` up front under "Why the scope changed" plus `evals/adherence/RESULTS.md` under a new "Measured: does re-injection actually help?" section reporting the null result honestly. Every enforcement claim, danger category, and the 12%/60%/40%/99.1% figures removed from user-facing docs (preserved in `archive/enforcement` and git history, never deleted).
+- **SKILL.md** rewritten: helps the user write plain-prose rules (marker syntax now positioned as optional, only for large files), explains the three triggers and the `.claude/seatbelt.json` fields, states plainly that this version does not block or check anything and that the adherence benefit itself isn't yet cleanly measured.
+- **CHANGELOG.md**: new v0.2.0 entry describing the scope cut, every file removed/added, and the `session-start.js` schema bug fix, framed honestly as a cut and a bug fix rather than a feature announcement.
+- **plugin.json / marketplace.json**: version bumped to 0.2.0, descriptions and keywords rewritten to match the reduced scope (`category: productivity` instead of `safety`, since there's no enforcement claim to back a safety category).
+- Verified all README/SKILL.md markdown links resolve to real files.
+- `claude plugin validate .` — passed.
+
+Gate met: README claims nothing the evals do not support (the one accuracy-adjacent claim it makes — re-injection helps adherence — is immediately qualified with a link to the null-result writeup, not asserted as fact). 90/90 tests passing.
+
 ---
 
 ## Status (superseded): round 2 of structural detection complete — blind recall is NON-MONOTONIC (12% -> 60% -> 40%), ceiling stated in README, no round 3 planned

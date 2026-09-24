@@ -2,13 +2,13 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "seatbelt",
   "displayName": "Seatbelt (rule-guard)",
-  "version": "0.1.0",
-  "description": "Stops Claude Code agents from breaking critical project rules after context compaction or via risky shell commands.",
+  "version": "0.2.0",
+  "description": "Keeps your CLAUDE.md/AGENTS.md rules alive in Claude Code's context across compaction, resume, and long sessions.",
   "author": {
     "name": "dripston"
   },
   "homepage": "https://github.com/dripston/seatbelt",
   "repository": "https://github.com/dripston/seatbelt",
   "license": "MIT",
-  "keywords": ["rules", "guard", "hooks", "safety", "claude-md", "agents-md"]
+  "keywords": ["rules", "reminder", "hooks", "claude-md", "agents-md", "context"]
 }
