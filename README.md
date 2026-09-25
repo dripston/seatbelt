@@ -2,7 +2,7 @@
 
 # 🪢 seatbelt
 
-**Keep your CLAUDE.md rules alive — across compaction, resume, and long sessions.**
+**Keep your `CLAUDE.md` rules alive — across compaction, resume, and long sessions.**
 
 [![version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -13,11 +13,12 @@
 
 ---
 
-Claude Code agents follow your `CLAUDE.md` / `AGENTS.md` rules at first, then silently drop them — after context compaction, on resume, or just from being deep in a long session. This is a real, documented gap ([issue evidence below](#the-problem-this-is-built-on)), not a guess.
+> Claude Code agents follow your `CLAUDE.md` / `AGENTS.md` rules at first, then silently drop them — after context compaction, on resume, or just from being deep in a long session. This is a real, documented gap ([see evidence](#-the-problem)).
 
-**seatbelt fixes the "silently drop" part.** It re-reads your rules and pushes them back into context at the three moments they're most likely to fall out. That's the whole product. It does not scan your commands, does not block anything, and does not try to guess what's dangerous.
+**seatbelt fixes the "silently drop" part.** 
+It re-reads your rules and pushes them back into context at the three moments they're most likely to fall out. That's the whole product. It does not scan your commands, does not block anything, and does not try to guess what's dangerous.
 
-```
+```text
                     ┌─────────────────────────────┐
    compaction  ───▶ │                             │
    resume      ───▶ │   your rules, re-injected   │ ───▶  agent sees them again
@@ -25,23 +26,24 @@ Claude Code agents follow your `CLAUDE.md` / `AGENTS.md` rules at first, then si
                     └─────────────────────────────┘
 ```
 
-## Install
+## 🚀 Quick Start
+
+### Installation
 
 ```bash
 claude plugin marketplace add dripston/seatbelt
 claude plugin install seatbelt
 ```
 
-Testing from a local clone instead of GitHub:
-
+*(Testing from a local clone instead of GitHub:)*
 ```bash
 claude plugin marketplace add ./path/to/local/seatbelt
 claude plugin install seatbelt
 ```
 
-## Use it
+### Usage
 
-Just write your rules the way you already do — no special syntax required:
+Just write your rules the way you already do — **no special syntax required:**
 
 ```markdown
 <!-- CLAUDE.md -->
@@ -50,7 +52,7 @@ Just write your rules the way you already do — no special syntax required:
 - Always run tests before committing.
 ```
 
-seatbelt's default mode re-injects the whole file when it's small, so most projects need zero setup. If your `CLAUDE.md` is large and you only want specific lines kept alive, wrap them:
+By default, seatbelt re-injects the whole file when it's small, so most projects need zero setup. If your `CLAUDE.md` is large and you only want specific lines kept alive, you can wrap them:
 
 ```markdown
 <!-- rule-guard:critical -->
@@ -58,19 +60,19 @@ seatbelt's default mode re-injects the whole file when it's small, so most proje
 <!-- /rule-guard:critical -->
 ```
 
-## How it works
+## ✨ How it Works
 
 | Trigger | Fires on | Why |
-|---|---|---|
+| :--- | :--- | :--- |
 | **Compaction** | `SessionStart`, `source: compact` | Claude Code's own summarization can drop rules from the compacted context. |
 | **Resume** | `SessionStart`, `source: resume` | Same risk when picking a saved session back up. |
-| **Depth** | `UserPromptSubmit` | Even without compacting, a long session degrades adherence purely from context depth. seatbelt estimates transcript size and re-injects past a threshold — first at 100,000 tokens, then every 50,000 after — independent of compaction. |
+| **Depth** | `UserPromptSubmit` | A long session degrades adherence purely from context depth. seatbelt estimates transcript size and re-injects past a threshold (first at 100K tokens, then every 50K). |
 
-The depth threshold isn't arbitrary: measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window. 100,000 sits right at the start of that zone. Full reasoning in [docs/DESIGN.md](docs/DESIGN.md).
+> 💡 **Why 100K tokens?** Measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window. 100,000 sits right at the start of that zone. Full reasoning in [docs/DESIGN.md](docs/DESIGN.md).
 
-## Configuration
+## ⚙️ Configuration
 
-Optional, drop a `.claude/seatbelt.json` in your project — every field has a sane default, and a typo in one never breaks the rest:
+Optional. Drop a `.claude/seatbelt.json` in your project to customize behavior. Every field has a sane default, and a typo in one never breaks the rest:
 
 ```json
 {
@@ -82,53 +84,41 @@ Optional, drop a `.claude/seatbelt.json` in your project — every field has a s
 }
 ```
 
-| Field | Default | Meaning |
-|---|---|---|
-| `firstFire` | `100000` | Token depth for the first depth-triggered re-injection |
-| `interval` | `50000` | Tokens between subsequent re-injections |
-| `mode` | `"auto"` | `auto` = whole file if small, else the marked block, else first 40 lines · `block` = marked block only · `full` = always the whole file |
-| `maxInjectTokens` | `1500` | Size budget `auto` mode checks against |
-| `minTurnsBetween` | `10` | Minimum turns between depth-triggered fires, so a token-estimation quirk can't spam your context |
+| Field | Default | Description |
+| :--- | :--- | :--- |
+| `firstFire` | `100000` | Token depth for the first depth-triggered re-injection. |
+| `interval` | `50000` | Tokens between subsequent re-injections. |
+| `mode` | `"auto"` | `"auto"`: whole file if small, else marked block, else first 40 lines.<br>`"block"`: marked block only.<br>`"full"`: always the whole file. |
+| `maxInjectTokens` | `1500` | Size budget `"auto"` mode checks against. |
+| `minTurnsBetween` | `10` | Minimum turns between depth-triggered fires to prevent context spamming. |
 
-## What seatbelt is *not*
+## 🛑 Limitations: What seatbelt is *not*
 
-seatbelt used to also try blocking dangerous Bash commands. It doesn't anymore, and here's the honest reason why:
+- **Does not block or check any command** — no `PreToolUse` hook, no deny, no ask.
+- **Does not detect "dangerous" content** — no opinion on command content at all.
+- **Is not a substitute for your own judgment** — a rule in context is more likely to be followed, not guaranteed to be.
+- **Does not fix `AGENTS.md` truncation** on very long files ([openai/codex#13386](https://github.com/openai/codex/issues/13386)) — that's a model-context bug.
+- **Adds a small per-invocation cost** (a bounded transcript size check per prompt, a small file read/write per session event).
 
-> Two rounds of real, blind-tested detection work found recall on unfamiliar tools was unstable and ecosystem-dependent — **12% → 60% → 40%** across three independent holdout tests, even while false positives stayed at 0%. That's not a foundation to ship a safety claim on, so it was cut. The code, tests, and full four-verdict eval history are preserved on [`archive/enforcement`](https://github.com/dripston/seatbelt/tree/archive/enforcement) — nothing deleted, just not shipped. Full numbers: [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md).
+## 📖 The Problem
 
-So, plainly:
+This tool is built on a documented, still-open gap in Claude Code:
 
-- ❌ Does not block or check any command — no `PreToolUse` hook, no deny, no ask.
-- ❌ Does not detect "dangerous" anything — no opinion on command content at all.
-- ❌ Is not a substitute for your own judgment — a rule in context is more likely to be followed, not guaranteed to be.
-- ❌ Does not fix `AGENTS.md` truncation on very long files ([openai/codex#13386](https://github.com/openai/codex/issues/13386)) — that's a model-context bug.
-- ⚠️ Adds a small per-invocation cost (a bounded transcript size check per prompt, a small file read/write per session event) — far cheaper than the old per-command hook, but not free.
+- [anthropics/claude-code#92257](https://github.com/anthropics/claude-code/issues/92257) — re-injection feature request, 7 prior duplicate reports, plus a dose-response report of adherence decaying with raw context depth.
+- [anthropics/claude-code#88565](https://github.com/anthropics/claude-code/issues/88565) — auto mode routes edits through Bash, bypassing rule injection.
+- [anthropics/claude-code#81999](https://github.com/anthropics/claude-code/issues/81999) — agent breaks an explicit "every time, no exceptions" rule after a few cycles.
+- [anthropics/claude-code#34197](https://github.com/anthropics/claude-code/issues/34197), [#43716](https://github.com/anthropics/claude-code/issues/43716) — CLAUDE.md ignored in long sessions.
 
-## Does re-injection actually help? Here's the honest answer.
+*(Full log: [docs/EVIDENCE.md](docs/EVIDENCE.md))*
 
-Two real headless test runs measured this directly. Both came back **null results** — not because the mechanism failed, but because neither test's "seatbelt off" control arm ever showed rule decay in the first place, so there was nothing for re-injection to visibly fix. One run also caught and fixed a real shipped bug (`SessionStart`'s output had the wrong JSON shape, so it was a silent no-op) — found by tracing live hook output, not by unit tests.
-
-**This is stated plainly, not spun.** The mechanism is confirmed working end-to-end (live-traced against the real Claude Code hook contract). Whether it measurably moves adherence at depth is still an open question. Full data and reasoning: [evals/adherence/RESULTS.md](evals/adherence/RESULTS.md).
-
-## The problem this is built on
-
-Not a guess — a documented, still-open gap:
-
-- [anthropics/claude-code#92257](https://github.com/anthropics/claude-code/issues/92257) — re-injection feature request, 7 prior duplicate reports, plus a dose-response report of adherence decaying with raw context depth
-- [anthropics/claude-code#88565](https://github.com/anthropics/claude-code/issues/88565) — auto mode routes edits through Bash, bypassing rule injection
-- [anthropics/claude-code#81999](https://github.com/anthropics/claude-code/issues/81999) — agent breaks an explicit "every time, no exceptions" rule after a few cycles
-- [anthropics/claude-code#34197](https://github.com/anthropics/claude-code/issues/34197), [#43716](https://github.com/anthropics/claude-code/issues/43716) — CLAUDE.md ignored in long sessions
-
-Full log: [docs/EVIDENCE.md](docs/EVIDENCE.md)
-
-## Prior art
+## 🔍 Prior Art
 
 [Cozempic](https://github.com/Ruya-AI/cozempic) does similar `SessionStart` reminders as part of a broader context-pruning tool. seatbelt is narrower on purpose: three triggers, nothing else.
 
-## Contributing
+## 🤝 Contributing
 
-Issues and PRs welcome. Run `node --test tests/*.test.js` before submitting.
+Issues and PRs welcome! Please run `node --test tests/*.test.js` before submitting.
 
-## License
+## 📄 License
 
 MIT
