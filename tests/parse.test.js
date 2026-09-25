@@ -9,6 +9,8 @@ const path = require('path');
 const {
   parseBlocksFromContent,
   findAllRulesFiles,
+  findGuardedRules,
+  guardPatternToRegExp,
   collectSearchDirs,
   MAX_UPWARD_LEVELS,
 } = require('../scripts/lib/parse-rules');
@@ -332,4 +334,67 @@ test('findAllRulesFiles collects files from multiple levels, nearest first', () 
   assert.equal(all.length, 2);
   assert.equal(all[0].content, 'sub file', 'nearest file should come first');
   assert.equal(all[1].content, 'root file');
+});
+
+// --- guardPatternToRegExp / findGuardedRules (guard-check.js's PreToolUse nudge) ---
+
+test('guardPatternToRegExp: wildcard matches variable content', () => {
+  const re = guardPatternToRegExp('rm * migrations/*');
+  assert.ok(re.test('rm -rf migrations/001_init.sql'));
+  assert.ok(!re.test('rm -rf src/index.js'));
+});
+
+test('guardPatternToRegExp: literal pattern with no wildcard', () => {
+  const re = guardPatternToRegExp('git push');
+  assert.ok(re.test('git push origin main'));
+  assert.ok(re.test('GIT PUSH')); // case-insensitive
+  assert.ok(!re.test('git pull'));
+});
+
+test('guardPatternToRegExp: special regex characters in pattern are escaped', () => {
+  const re = guardPatternToRegExp('rm -rf .git/*');
+  assert.ok(re.test('rm -rf .git/hooks'));
+  assert.ok(!re.test('rm -rf Xgit/hooks')); // literal dot should not match any-char
+});
+
+test('findGuardedRules only returns rules with a [guard: ...] tag', () => {
+  const dir = mkTmpDir();
+  fs.writeFileSync(
+    path.join(dir, 'CLAUDE.md'),
+    [
+      '<!-- rule-guard:critical -->',
+      '- Guarded rule. [guard: git push]',
+      '- Plain rule with no guard tag.',
+      '<!-- /rule-guard:critical -->',
+    ].join('\n')
+  );
+  const guarded = findGuardedRules(dir);
+  assert.equal(guarded.length, 1);
+  assert.equal(guarded[0].text, 'Guarded rule.');
+});
+
+test('findGuardedRules merges guarded rules across monorepo levels', () => {
+  const root = mkTmpDir();
+  fs.writeFileSync(
+    path.join(root, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Root guarded rule. [guard: foo]\n<!-- /rule-guard:critical -->\n'
+  );
+  const sub = path.join(root, 'packages', 'api');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(
+    path.join(sub, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Sub guarded rule. [guard: bar]\n<!-- /rule-guard:critical -->\n'
+  );
+
+  const guarded = findGuardedRules(sub);
+  const texts = guarded.map((r) => r.text).sort();
+  assert.deepEqual(texts, ['Root guarded rule.', 'Sub guarded rule.']);
+});
+
+test('findGuardedRules returns empty array (not throw) when no files exist', () => {
+  const dir = mkTmpDir();
+  assert.doesNotThrow(() => {
+    const guarded = findGuardedRules(dir);
+    assert.deepEqual(guarded, []);
+  });
 });

@@ -177,10 +177,67 @@ function findAllRulesFiles(cwd) {
   return results;
 }
 
+/**
+ * Converts a guard pattern like "git push" or "rm * migrations/*" into a
+ * RegExp for exact/wildcard matching against a literal command string.
+ * '*' becomes a wildcard matching any characters (including none);
+ * everything else is escaped literally. This is deliberately just a
+ * string matcher, not a classifier: it only matches patterns the user
+ * explicitly wrote themselves, so there's no recall/precision question
+ * the way there was for the removed danger-detection feature (which
+ * tried to guess what's "risky" from arbitrary, unguarded commands).
+ */
+function guardPatternToRegExp(pattern) {
+  const escaped = pattern
+    .split('*')
+    // Trim each segment before escaping: a pattern like "rm * migrations/*"
+    // has a leading space on " migrations/" purely to separate it from the
+    // '*' in the source text — that space is already implied by the
+    // wildcard's own '.*' (which can match zero-or-more characters,
+    // including a space or nothing at all). Without trimming, that literal
+    // leading/trailing space becomes an ADDITIONAL mandatory \s+ requirement
+    // stacked next to the wildcard, so "rm migrations/x" (no flags, just
+    // one space between "rm" and "migrations/") fails to match because the
+    // regex demands two separate whitespace gaps.
+    .map((part) => part.trim())
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    // Collapse runs of literal whitespace into a class that tolerates
+    // incidental spacing variations: repeated/tab/newline whitespace
+    // ("git  push"), and a Bash backslash line-continuation ("git\" +
+    // newline + "push", where a literal backslash sits between the word
+    // and the newline). \\?\s+ matches an optional backslash followed by
+    // one or more whitespace characters.
+    .map((part) => part.replace(/\s+/g, '\\\\?\\s+'))
+    .join('.*');
+  // 's' (dotAll) flag: '.' must also match embedded newlines, otherwise a
+  // command split across lines (e.g. a backslash line-continuation)
+  // silently evades a guard pattern.
+  return new RegExp(escaped, 'is');
+}
+
+/**
+ * Finds all guarded rules ({text, guard}) visible from cwd, merged across
+ * every candidate file found by findAllRulesFiles (cwd plus parent
+ * directories up to a repo boundary). Rules with no [guard: ...] tag are
+ * excluded — this is the only entry point guard-check.js uses, so a plain
+ * unguarded rule can never trigger a match. Never throws.
+ */
+function findGuardedRules(cwd) {
+  try {
+    const files = findAllRulesFiles(cwd);
+    const rules = files.flatMap((f) => parseBlocksFromContent(f.content));
+    return rules.filter((r) => r.guard);
+  } catch (_err) {
+    return [];
+  }
+}
+
 module.exports = {
   parseBlocksFromContent,
   findRulesFile,
   findAllRulesFiles,
+  findGuardedRules,
+  guardPatternToRegExp,
   collectSearchDirs,
   normalizeCwd,
   CANDIDATE_FILES,

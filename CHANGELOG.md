@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0 — guard-match nudge
+
+**Added a fourth trigger: guard-match nudging.** Re-injection addresses one failure mode (a rule falls out of context). It doesn't address a different one: the model can have the rule in context and still act against it — quoting a rule proves it loaded, not that it's still governing behavior.
+
+- Added: `PreToolUse` hook on Bash (`scripts/guard-check.js`). If a command matches a `[guard: pattern]` tag the user explicitly wrote on a rule, emits `permissionDecision: "ask"` naming the matched rule — a visible heads-up, never a `"deny"`. Unguarded rules can never trigger this; only ever re-injected.
+- This is deliberately **not** a revival of v0.1.0's command classification. It does zero judgment calls: literal/wildcard string matching against a pattern the user wrote themselves, same risk profile as a `.gitignore` pattern, not a danger-detection heuristic. No command tokenizing/splitting/shell-trick handling either — a command that hides the matching text behind piping or `eval` may not match, which is an acceptable miss for a nudge (cost: no reminder) where it would not have been acceptable for a blocker (cost: a real command going unblocked).
+- Re-added `guardPatternToRegExp` and a new `findGuardedRules(cwd)` to `scripts/lib/parse-rules.js`, scoped to this narrower purpose (they were deleted as dead code from the killed v0.1.0 enforcement feature one commit prior; this is a deliberate, scoped re-addition, not a revert).
+- Fixed in passing: `depth-state.js`'s stale-file pruning did a full OS-temp-directory scan on every `UserPromptSubmit` (every prompt, not once per session, despite its own comment claiming otherwise) — throttled to once per 10 minutes per process.
+- README/SKILL.md updated: the "does not block or check any command" claim from v0.2.0 is no longer accurate and has been corrected; the underlying reason enforcement was cut (unreliable classification) is preserved and clarified as not applying to guard-match nudging (no classification involved).
+
 ## v0.2.0 — scope cut: re-injection only
 
 **Enforcement removed.** v0.1.0's `PreToolUse` hook (command-level deny/ask against risky Bash commands) is cut. Two rounds of structural-detection work found its recall against tools it hadn't seen before was unstable and ecosystem-dependent (12%, then 60%, then 40% across three independently-built blind tests), which is not a foundation to ship a safety claim on. The removed code and its full evaluation history are preserved on the `archive/enforcement` branch, not deleted.

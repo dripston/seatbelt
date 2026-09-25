@@ -4,9 +4,9 @@
 
 **Keep your `CLAUDE.md` rules alive — across compaction, resume, and long sessions.**
 
-[![version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.3.0-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-106%2F106%20passing-brightgreen)](tests/)
+[![tests](https://img.shields.io/badge/tests-126%2F126%20passing-brightgreen)](tests/)
 [![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](#-limitations-what-seatbelt-is-not)
 
 </div>
@@ -15,8 +15,8 @@
 
 > Claude Code agents follow your `CLAUDE.md` / `AGENTS.md` rules at first, then silently drop them — after context compaction, on resume, or just from being deep in a long session. This is a real, documented gap ([see evidence](#-the-problem)).
 
-**seatbelt fixes the "silently drop" part.** 
-It re-reads your rules and pushes them back into context at the three moments they're most likely to fall out. That's the whole product. It does not scan your commands, does not block anything, and does not try to guess what's dangerous.
+**seatbelt does two things: it reminds, and it nudges.**
+Reminding re-reads your rules and pushes them back into context at the three moments they're most likely to fall out. Nudging catches the moment a command is about to match a rule you explicitly flagged, and surfaces a plain heads-up before it runs. Neither one blocks anything or guesses what's "dangerous" — nudging only fires on a pattern you wrote yourself, word for word.
 
 ```text
                     ┌─────────────────────────────┐
@@ -24,6 +24,8 @@ It re-reads your rules and pushes them back into context at the three moments th
    resume      ───▶ │   your rules, re-injected   │ ───▶  agent sees them again
    deep context ──▶ │                             │
                     └─────────────────────────────┘
+
+   your command  ──▶  matches a rule you flagged?  ──▶  "heads up" nudge, not a block
 ```
 
 ## 🚀 Quick Start
@@ -60,6 +62,16 @@ By default, seatbelt re-injects the whole file when it's small, so most projects
 <!-- /rule-guard:critical -->
 ```
 
+Want a specific rule to also trigger a heads-up right before a matching command runs? Tag it with a guard pattern:
+
+```markdown
+<!-- rule-guard:critical -->
+- Never push without asking me first. [guard: git push]
+<!-- /rule-guard:critical -->
+```
+
+`*` is a wildcard. `[guard: rm * migrations/*]` matches any `rm` command touching `migrations/`. This is a literal/wildcard string match against the pattern you wrote — not a classifier, and not required. Unguarded rules never trigger a nudge; they're only ever re-injected.
+
 **Monorepos work out of the box.** Running Claude Code from a subdirectory (`cd packages/api && claude`)? seatbelt walks up to your repo root to find `CLAUDE.md`, stopping at the first `.git` boundary — no config needed.
 
 ## ✨ How it Works
@@ -69,6 +81,7 @@ By default, seatbelt re-injects the whole file when it's small, so most projects
 | **Compaction** | `SessionStart`, `source: compact` | Claude Code's own summarization can drop rules from the compacted context. |
 | **Resume** | `SessionStart`, `source: resume` | Same risk when picking a saved session back up. |
 | **Depth** | `UserPromptSubmit` | A long session degrades adherence purely from context depth. seatbelt estimates transcript size and re-injects past a threshold (first at 100K tokens, then every 50K). |
+| **Guard match** | `PreToolUse` (Bash only) | Addresses a different failure mode: the model can have a rule in context and still act against it. If a Bash command matches a `[guard: pattern]` you wrote, seatbelt surfaces a plain heads-up (`permissionDecision: "ask"`) naming the rule — never a block. Only fires for rules you explicitly tagged; unguarded rules are unaffected. |
 
 > 💡 **Why 100K tokens?** Measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window (roughly 100K for Claude Code's ~200K window). 100,000 sits right at the start of that zone, before the steep part of the drop-off.
 >
@@ -98,17 +111,20 @@ Optional. Drop a `.claude/seatbelt.json` in your project to customize behavior. 
 
 ## 🛑 Limitations: What seatbelt is *not*
 
-seatbelt used to also try blocking dangerous Bash commands. It doesn't anymore — here's the honest reason:
+seatbelt used to try classifying which Bash commands were "dangerous" in general. It doesn't anymore — here's the honest reason:
 
 > Two rounds of real, blind-tested detection work found recall on unfamiliar tools was unstable and ecosystem-dependent — **12% → 60% → 40%** across three independent holdout tests, even while false positives stayed at 0%. That's not a foundation to ship a safety claim on, so it was cut. The code is preserved on [`archive/enforcement`](https://github.com/dripston/seatbelt/tree/archive/enforcement) — nothing deleted, just not shipped.
 
+The `PreToolUse` guard-match nudge added later is a deliberately narrower, different thing: it does **zero classification**. It only matches a Bash command against a literal/wildcard pattern *you* wrote yourself in a `[guard: ...]` tag — there's no guessing at what's risky, so there's no recall/precision number to fail. If you don't tag a rule with a guard pattern, it can never trigger a nudge; it's only ever re-injected.
+
 So, plainly:
 
-- **Does not block or check any command** — no `PreToolUse` hook, no deny, no ask.
-- **Does not detect "dangerous" content** — no opinion on command content at all.
-- **Is not a substitute for your own judgment** — a rule in context is more likely to be followed, not guaranteed to be.
+- **Does not block any command, ever** — the guard-match nudge only ever emits `"ask"` (a visible heads-up), never `"deny"`.
+- **Does not detect "dangerous" content** — it has no opinion on any command that isn't an exact/wildcard match against a pattern you wrote.
+- **The guard-match nudge does raw string matching, not shell parsing** — a command that hides the matching text behind piping, chaining, or `eval` may not match. For a nudge, a missed match just means no reminder, not a security failure — this is a deliberate simplification, not an oversight (see [`archive/enforcement`](https://github.com/dripston/seatbelt/tree/archive/enforcement) for the more complex tokenizing pipeline this intentionally does *not* reuse).
+- **Is not a substitute for your own judgment** — a rule in context, or a nudge before a matching command, makes the model more likely to comply, not guaranteed to.
 - **Does not fix `AGENTS.md` truncation** on very long files ([openai/codex#13386](https://github.com/openai/codex/issues/13386)) — that's a model-context bug.
-- **Adds a small per-invocation cost** (a bounded transcript size check per prompt, a small file read/write per session event).
+- **Adds a small per-invocation cost** (a bounded transcript size check per prompt, a small file read/write per session event, a regex test per guarded rule per Bash command).
 - **The adherence benefit of re-injection is not yet confirmed by a clean measurement.** Re-injecting the text is verified and tested; whether it measurably improves rule-following at depth is not — real test runs produced a null result rather than a clear signal either way. If you need proof it changes model behavior, this isn't that yet — it's the mechanism the theory needs, tested for correctness, not for effect size.
 
 ## 📖 The Problem
@@ -122,7 +138,7 @@ This tool is built on a documented, still-open gap in Claude Code:
 
 ## 🔍 Prior Art
 
-[Cozempic](https://github.com/Ruya-AI/cozempic) does similar `SessionStart` reminders as part of a broader context-pruning tool. seatbelt is narrower on purpose: three triggers, nothing else.
+[Cozempic](https://github.com/Ruya-AI/cozempic) does similar `SessionStart` reminders as part of a broader context-pruning tool. seatbelt is narrower on purpose: four triggers, no command classification.
 
 ## 🤝 Contributing
 
