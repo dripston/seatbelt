@@ -4,9 +4,9 @@
 
 **Keep your `CLAUDE.md` rules alive — across compaction, resume, and long sessions.**
 
-[![version](https://img.shields.io/badge/version-0.3.0-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.3.1-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-126%2F126%20passing-brightgreen)](tests/)
+[![tests](https://img.shields.io/badge/tests-128%2F128%20passing-brightgreen)](tests/)
 [![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](#-limitations-what-seatbelt-is-not)
 
 </div>
@@ -81,7 +81,7 @@ Want a specific rule to also trigger a heads-up right before a matching command 
 | **Compaction** | `SessionStart`, `source: compact` | Claude Code's own summarization can drop rules from the compacted context. |
 | **Resume** | `SessionStart`, `source: resume` | Same risk when picking a saved session back up. |
 | **Depth** | `UserPromptSubmit` | A long session degrades adherence purely from context depth. seatbelt estimates transcript size and re-injects past a threshold (first at 100K tokens, then every 50K). |
-| **Guard match** | `PreToolUse` (Bash only) | Addresses a different failure mode: the model can have a rule in context and still act against it. If a Bash command matches a `[guard: pattern]` you wrote, seatbelt surfaces a plain heads-up (`permissionDecision: "ask"`) naming the rule — never a block. Only fires for rules you explicitly tagged; unguarded rules are unaffected. |
+| **Guard match** | `PreToolUse` (shell commands) | Addresses a different failure mode: the model can have a rule in context and still act against it. If a shell command matches a `[guard: pattern]` you wrote, seatbelt surfaces a plain heads-up (`permissionDecision: "ask"`) naming the rule — never a block. Fires for both Claude Code's `Bash` tool and its Windows `PowerShell` fallback (used when Git Bash isn't detected). Only fires for rules you explicitly tagged; unguarded rules are unaffected. |
 
 > 💡 **Why 100K tokens?** Measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window (roughly 100K for Claude Code's ~200K window). 100,000 sits right at the start of that zone, before the steep part of the drop-off.
 >
@@ -115,7 +115,7 @@ seatbelt used to try classifying which Bash commands were "dangerous" in general
 
 > Two rounds of real, blind-tested detection work found recall on unfamiliar tools was unstable and ecosystem-dependent — **12% → 60% → 40%** across three independent holdout tests, even while false positives stayed at 0%. That's not a foundation to ship a safety claim on, so it was cut. The code is preserved on [`archive/enforcement`](https://github.com/dripston/seatbelt/tree/archive/enforcement) — nothing deleted, just not shipped.
 
-The `PreToolUse` guard-match nudge added later is a deliberately narrower, different thing: it does **zero classification**. It only matches a Bash command against a literal/wildcard pattern *you* wrote yourself in a `[guard: ...]` tag — there's no guessing at what's risky, so there's no recall/precision number to fail. If you don't tag a rule with a guard pattern, it can never trigger a nudge; it's only ever re-injected.
+The `PreToolUse` guard-match nudge added later is a deliberately narrower, different thing: it does **zero classification**. It only matches a shell command against a literal/wildcard pattern *you* wrote yourself in a `[guard: ...]` tag — there's no guessing at what's risky, so there's no recall/precision number to fail. If you don't tag a rule with a guard pattern, it can never trigger a nudge; it's only ever re-injected.
 
 So, plainly:
 

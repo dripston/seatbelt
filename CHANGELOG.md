@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.1 — fix: guard-match nudge was inert on Windows without Git Bash
+
+Verified v0.3.0's new `PreToolUse` hook against a real, live `claude` invocation before calling it done (this project's own established practice — the `additionalContext` nesting bug in v0.2.0 was also only found this way). Found: on a Windows machine where Claude Code can't detect Git Bash, it logs "Git Bash not found; BashTool will be unavailable" and routes shell execution through a tool literally named `PowerShell`, not `Bash` — confirmed via a live hook-input capture. `guard-check.js`'s hook registration matched only `"Bash"`, so on any such machine the `PreToolUse` dispatcher never invoked the script at all: completely inert, silently, exactly the failure mode this project exists to prevent.
+
+- Fixed: `hooks.json`'s `PreToolUse` matcher is now `"Bash|PowerShell"`; `guard-check.js` accepts either `tool_name` via a new `isMatchedTool()` (both tools carry the command string under the same `tool_input.command` field, confirmed live).
+- Re-verified live end-to-end after the fix: a guarded `git push` run through the `PowerShell` fallback path now correctly triggers the nudge; an unrelated command still runs silently with no nudge.
+- Added unit + end-to-end tests locking in `PowerShell` as an accepted tool name, so this can't silently regress.
+
 ## v0.3.0 — guard-match nudge
 
 **Added a fourth trigger: guard-match nudging.** Re-injection addresses one failure mode (a rule falls out of context). It doesn't address a different one: the model can have the rule in context and still act against it — quoting a rule proves it loaded, not that it's still governing behavior.

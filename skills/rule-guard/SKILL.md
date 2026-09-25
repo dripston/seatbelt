@@ -46,7 +46,7 @@ When a user asks you to set this up:
 1. **Compaction** — `SessionStart` fires with `source: compact` right after Claude Code compacts a session; seatbelt re-injects.
 2. **Resume** — same hook, `source: resume`, when a saved session is resumed.
 3. **Depth** — `UserPromptSubmit` estimates transcript token depth and re-injects once past a threshold (default 100,000 tokens, then every 50,000), independent of compaction, with a turn-count floor so an estimation quirk can't spam re-injections.
-4. **Guard match** — `PreToolUse` on Bash commands. If the command matches a `[guard: pattern]` a rule was tagged with, emits a plain `"ask"` heads-up naming the rule. Addresses a different failure mode than the other three: the model can have the rule in context and still act against it, so this catches the moment of the action itself rather than relying on re-injected text to be enough.
+4. **Guard match** — `PreToolUse` on shell commands (Claude Code's `Bash` tool, and its Windows `PowerShell` fallback when Git Bash isn't detected). If the command matches a `[guard: pattern]` a rule was tagged with, emits a plain `"ask"` heads-up naming the rule. Addresses a different failure mode than the other three: the model can have the rule in context and still act against it, so this catches the moment of the action itself rather than relying on re-injected text to be enough.
 
 ## What this plugin does NOT do
 

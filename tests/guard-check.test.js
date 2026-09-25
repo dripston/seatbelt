@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { decide } = require('../scripts/guard-check');
+const { decide, isMatchedTool } = require('../scripts/guard-check');
 
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'guard-check.js');
 
@@ -90,9 +90,30 @@ test('a command that only textually resembles a pattern via unrelated substrings
   assert.ok(rule, 'raw string match is expected to fire even inside a quoted arg — a nudge, not a block, so this is an acceptable false positive');
 });
 
+// --- isMatchedTool: which tool_name values carry a shell command ---
+//
+// Real bug, reproduced live before this was added: Claude Code on Windows
+// falls back to a tool literally named "PowerShell" (not "Bash") when Git
+// Bash isn't detected, confirmed via a live hook-input capture — logged as
+// "Git Bash not found; BashTool will be unavailable" — while still putting
+// the command string under the same tool_input.command field. Matching
+// only "Bash" meant the PreToolUse dispatcher never even invoked this
+// script on such a machine: completely inert, with zero indication to the
+// user. This exact failure mode (silently doing nothing) is what this
+// whole project exists to avoid.
+
+test('isMatchedTool accepts Bash and PowerShell, rejects everything else', () => {
+  assert.equal(isMatchedTool('Bash'), true);
+  assert.equal(isMatchedTool('PowerShell'), true);
+  assert.equal(isMatchedTool('Read'), false);
+  assert.equal(isMatchedTool('Edit'), false);
+  assert.equal(isMatchedTool(undefined), false);
+  assert.equal(isMatchedTool(null), false);
+});
+
 // --- End-to-end: real Claude Code hook contract ---
 
-test('end-to-end: non-Bash tool call is silently allowed (no stdout)', () => {
+test('end-to-end: non-shell tool call is silently allowed (no stdout)', () => {
   const dir = mkProject('- Rule. [guard: git push]');
   const result = spawnSync('node', [SCRIPT], {
     input: JSON.stringify({ tool_name: 'Read', tool_input: { file_path: 'x' }, cwd: dir }),
@@ -100,6 +121,18 @@ test('end-to-end: non-Bash tool call is silently allowed (no stdout)', () => {
   });
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '');
+});
+
+test('end-to-end: a matching command via the PowerShell tool_name still triggers the nudge (the Windows Git-Bash-unavailable fallback path)', () => {
+  const dir = mkProject('- Never push without asking. [guard: git push]');
+  const result = spawnSync('node', [SCRIPT], {
+    input: JSON.stringify({ tool_name: 'PowerShell', tool_input: { command: 'git push origin main' }, cwd: dir }),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.hookSpecificOutput.permissionDecision, 'ask');
+  assert.match(output.hookSpecificOutput.permissionDecisionReason, /Never push without asking/);
 });
 
 test('end-to-end: Bash command with no guard match is silently allowed', () => {
