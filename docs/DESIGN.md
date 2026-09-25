@@ -18,6 +18,11 @@ Rules with a trailing `[guard: <pattern>]` are linked to command matching (Phase
 `./CLAUDE.md`, `./.claude/CLAUDE.md`, `./AGENTS.md` — all three are read if present, and all critical blocks found across them are merged into one rule set.
 One-line justification: users may have either/both file conventions (CLAUDE.md is Claude-specific, AGENTS.md is the cross-tool standard many are asking Claude Code to also support per issue #6235) — merging avoids picking a side.
 
+**Upward directory traversal (monorepo support)**: discovery isn't limited to `cwd`. `parse-rules.js`'s `collectSearchDirs()` walks upward from `cwd` toward the filesystem root, checking each level for the three candidate files, stopping at the first directory containing `.git` (the repo boundary — inclusive, so the repo root itself is still checked) or after 10 levels, whichever comes first. `.claude/seatbelt.json` config discovery uses the same traversal (`load-config.js`'s `findConfigPath()`), so a config placed at a monorepo's root is found from any subdirectory.
+
+This exists because of a real, confirmed bug: without it, a session started in a subdirectory (e.g. `cd packages/api && claude`, an entirely ordinary monorepo workflow) found zero rules even when a valid `CLAUDE.md` existed at the repo root — silently, the exact failure mode this whole project exists to prevent. Reproduced directly, fixed, and covered by tests in `tests/parse.test.js` (subdirectory discovery, multi-level nesting, repo-boundary stop, git worktrees, the hard depth cap, and merging rules found at multiple levels).
+One-line justification: the `.git`-boundary stop (rather than walking to the filesystem root) prevents accidentally picking up an unrelated `CLAUDE.md` sitting in some ancestor directory that isn't actually part of the current project — e.g. a personal notes file in `~/CLAUDE.md` several levels above a deeply-nested repo.
+
 ## Built-in risky command list (always "ask" even with no guard tag)
 
 `git push`, `git push --force`, `git push -f`, `git reset --hard`, `git clean -f`, `git branch -D`, `rm -rf`, `git checkout -- .`, `vercel --prod`, `firebase deploy`, `kubectl apply`, `terraform apply`.

@@ -86,24 +86,67 @@ function readFileSafe(filePath) {
   }
 }
 
+// How many parent directories to walk upward looking for a rules file,
+// so a session started in a monorepo subdirectory (e.g. `packages/api`)
+// still finds rules declared at the repo root. Reproduced directly as a
+// real, silent failure before this was added: findAndParseRules found 0
+// rules from a subdirectory even though the parent directory had a
+// valid CLAUDE.md. Capped rather than unbounded so a pathological/
+// unusual cwd (e.g. a very deep path, or one with no filesystem root
+// reachable for some reason) can't cause an unbounded loop; stops early
+// at a directory containing `.git` (the repo boundary) or the
+// filesystem root, whichever comes first.
+const MAX_UPWARD_LEVELS = 10;
+
 /**
- * Finds and merges critical-block rules from all candidate files
- * under cwd. Guaranteed not to throw.
- * Returns { rules: [{text, guard}], sources: [absolutePathsFound] }
+ * Walks upward from `startDir` (inclusive) toward the filesystem root,
+ * yielding each directory to check for rules files. Stops after finding
+ * a `.git` directory/file (repo boundary, inclusive of that directory)
+ * or after MAX_UPWARD_LEVELS, whichever comes first. Never throws.
+ */
+function collectSearchDirs(startDir) {
+  const dirs = [];
+  let current = startDir;
+  for (let i = 0; i < MAX_UPWARD_LEVELS; i++) {
+    dirs.push(current);
+    let hasGitBoundary = false;
+    try {
+      hasGitBoundary = fs.existsSync(path.join(current, '.git'));
+    } catch (_err) {
+      hasGitBoundary = false;
+    }
+    if (hasGitBoundary) break;
+    const parent = path.dirname(current);
+    if (parent === current) break; // reached filesystem root
+    current = parent;
+  }
+  return dirs;
+}
+
+/**
+ * Finds and merges critical-block rules from all candidate files under
+ * cwd AND each parent directory up to a repo boundary (a directory
+ * containing `.git`) or MAX_UPWARD_LEVELS, whichever comes first. This
+ * is what makes rules declared at a repo root visible to a session
+ * started in a subdirectory (e.g. a monorepo's packages/api). Guaranteed
+ * not to throw. Returns { rules: [{text, guard}], sources: [absolutePathsFound] }
  */
 function findAndParseRules(cwd) {
   const sources = [];
   const rules = [];
   const normalizedCwd = normalizeCwd(cwd);
   try {
-    for (const rel of CANDIDATE_FILES) {
-      const abs = path.join(normalizedCwd, rel);
-      if (!fs.existsSync(abs)) continue;
-      const content = readFileSafe(abs);
-      const found = parseBlocksFromContent(content);
-      if (found.length > 0) {
-        sources.push(abs);
-        rules.push(...found);
+    const searchDirs = collectSearchDirs(normalizedCwd);
+    for (const dir of searchDirs) {
+      for (const rel of CANDIDATE_FILES) {
+        const abs = path.join(dir, rel);
+        if (!fs.existsSync(abs)) continue;
+        const content = readFileSafe(abs);
+        const found = parseBlocksFromContent(content);
+        if (found.length > 0) {
+          sources.push(abs);
+          rules.push(...found);
+        }
       }
     }
   } catch (_err) {
@@ -169,19 +212,26 @@ function guardPatternToRegExp(pattern) {
 }
 
 /**
- * Finds the first candidate rules file under cwd (CLAUDE.md, then
- * .claude/CLAUDE.md, then AGENTS.md) and returns its raw content and
- * absolute path, or null if none exist. Used by auto-mode's "full" path
- * in content-mode selection (scripts/lib/select-content.js). Never throws.
+ * Finds the nearest candidate rules file, searching cwd first and then
+ * walking upward toward a repo boundary or MAX_UPWARD_LEVELS (same
+ * traversal as findAndParseRules, so a subdirectory session still finds
+ * a root-level CLAUDE.md). Within a single directory, checks CLAUDE.md,
+ * then .claude/CLAUDE.md, then AGENTS.md. Returns { path, content } for
+ * the first match, or null if none exist anywhere in the search path.
+ * Used by auto-mode's "full" path in content-mode selection
+ * (scripts/lib/select-content.js). Never throws.
  */
 function findRulesFile(cwd) {
   const normalizedCwd = normalizeCwd(cwd);
   try {
-    for (const rel of CANDIDATE_FILES) {
-      const abs = path.join(normalizedCwd, rel);
-      if (!fs.existsSync(abs)) continue;
-      const content = readFileSafe(abs);
-      if (content) return { path: abs, content };
+    const searchDirs = collectSearchDirs(normalizedCwd);
+    for (const dir of searchDirs) {
+      for (const rel of CANDIDATE_FILES) {
+        const abs = path.join(dir, rel);
+        if (!fs.existsSync(abs)) continue;
+        const content = readFileSafe(abs);
+        if (content) return { path: abs, content };
+      }
     }
   } catch (_err) {
     return null;
@@ -190,20 +240,25 @@ function findRulesFile(cwd) {
 }
 
 /**
- * Returns ALL candidate rules files that exist under cwd, each with their
- * raw content and absolute path. Used by block-mode and auto-mode's block
- * fallback to merge critical rules from CLAUDE.md, .claude/CLAUDE.md, and
- * AGENTS.md without stopping at the first file found. Never throws.
+ * Returns ALL candidate rules files that exist under cwd or any parent
+ * directory up to a repo boundary or MAX_UPWARD_LEVELS, each with their
+ * raw content and absolute path, nearest-first. Used by block-mode and
+ * auto-mode's block fallback to merge critical rules from every
+ * CLAUDE.md/.claude/CLAUDE.md/AGENTS.md found in the search path, not
+ * just the first file in the nearest directory. Never throws.
  */
 function findAllRulesFiles(cwd) {
   const normalizedCwd = normalizeCwd(cwd);
   const results = [];
   try {
-    for (const rel of CANDIDATE_FILES) {
-      const abs = path.join(normalizedCwd, rel);
-      if (!fs.existsSync(abs)) continue;
-      const content = readFileSafe(abs);
-      if (content) results.push({ path: abs, content });
+    const searchDirs = collectSearchDirs(normalizedCwd);
+    for (const dir of searchDirs) {
+      for (const rel of CANDIDATE_FILES) {
+        const abs = path.join(dir, rel);
+        if (!fs.existsSync(abs)) continue;
+        const content = readFileSafe(abs);
+        if (content) results.push({ path: abs, content });
+      }
     }
   } catch (_err) {
     return results;
@@ -216,7 +271,9 @@ module.exports = {
   findAndParseRules,
   findRulesFile,
   findAllRulesFiles,
+  collectSearchDirs,
   guardPatternToRegExp,
   normalizeCwd,
   CANDIDATE_FILES,
+  MAX_UPWARD_LEVELS,
 };

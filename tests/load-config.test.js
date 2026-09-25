@@ -107,3 +107,25 @@ test('non-numeric string values for numeric fields fall back to defaults', () =>
   assert.equal(config.firstFire, DEFAULTS.firstFire);
   assert.equal(config.interval, DEFAULTS.interval);
 });
+
+test('config at repo root is found from a monorepo subdirectory', () => {
+  const root = mkProject();
+  writeConfig(root, JSON.stringify({ firstFire: 12345, mode: 'block' }));
+  const sub = path.join(root, 'packages', 'api');
+  fs.mkdirSync(sub, { recursive: true });
+
+  const config = loadConfig(sub);
+  assert.equal(config.firstFire, 12345);
+  assert.equal(config.mode, 'block');
+});
+
+test('a nearer config wins over a root config when both exist', () => {
+  const root = mkProject();
+  writeConfig(root, JSON.stringify({ firstFire: 11111 }));
+  const sub = path.join(root, 'packages', 'api');
+  fs.mkdirSync(sub, { recursive: true });
+  writeConfig(sub, JSON.stringify({ firstFire: 22222 }));
+
+  const config = loadConfig(sub);
+  assert.equal(config.firstFire, 22222);
+});

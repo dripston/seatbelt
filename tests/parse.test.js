@@ -10,6 +10,8 @@ const {
   parseBlocksFromContent,
   findAndParseRules,
   guardPatternToRegExp,
+  collectSearchDirs,
+  MAX_UPWARD_LEVELS,
 } = require('../scripts/lib/parse-rules');
 
 function mkTmpDir() {
@@ -191,4 +193,154 @@ test('mixed bullet styles in critical block all parse correctly', () => {
   assert.equal(rules.length, 4);
   const texts = rules.map((r) => r.text);
   assert.deepEqual(texts, ['Dash rule', 'Star rule', 'Plus rule', 'Numbered rule']);
+});
+
+// --- Upward directory traversal (monorepo support) ---
+//
+// Real bug, reproduced directly before this fix existed: a session
+// started in a monorepo subdirectory (e.g. `packages/api`) found ZERO
+// rules even when a valid CLAUDE.md existed at the repo root, because
+// findAndParseRules/findRulesFile/findAllRulesFiles only ever checked
+// `cwd` itself. Confirmed reachable in practice via docs/HOOK_INPUT_EVIDENCE.md
+// (Claude Code's `cwd` does track a Bash `cd` into a subdirectory).
+
+test('findAndParseRules discovers a repo-root CLAUDE.md from a subdirectory', () => {
+  const root = mkTmpDir();
+  fs.writeFileSync(
+    path.join(root, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Root rule [guard: foo]\n<!-- /rule-guard:critical -->\n'
+  );
+  const sub = path.join(root, 'packages', 'api');
+  fs.mkdirSync(sub, { recursive: true });
+
+  const atRoot = findAndParseRules(root);
+  const atSub = findAndParseRules(sub);
+  assert.equal(atRoot.rules.length, 1);
+  assert.equal(atSub.rules.length, 1, 'subdirectory search should find the root rules file');
+  assert.equal(atSub.rules[0].text, 'Root rule');
+});
+
+test('findAndParseRules discovers rules several levels up (nested monorepo)', () => {
+  const root = mkTmpDir();
+  fs.writeFileSync(
+    path.join(root, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Deeply inherited rule\n<!-- /rule-guard:critical -->\n'
+  );
+  const deep = path.join(root, 'apps', 'web', 'src', 'components', 'forms');
+  fs.mkdirSync(deep, { recursive: true });
+
+  const result = findAndParseRules(deep);
+  assert.equal(result.rules.length, 1);
+  assert.equal(result.rules[0].text, 'Deeply inherited rule');
+});
+
+test('upward traversal stops at a .git boundary and does not read past the repo root', () => {
+  const outside = mkTmpDir();
+  fs.writeFileSync(
+    path.join(outside, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Rule outside the repo, must not be found\n<!-- /rule-guard:critical -->\n'
+  );
+  const repoRoot = path.join(outside, 'myrepo');
+  fs.mkdirSync(path.join(repoRoot, '.git'), { recursive: true });
+  fs.writeFileSync(
+    path.join(repoRoot, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Rule inside the repo\n<!-- /rule-guard:critical -->\n'
+  );
+  const sub = path.join(repoRoot, 'packages', 'api');
+  fs.mkdirSync(sub, { recursive: true });
+
+  const result = findAndParseRules(sub);
+  assert.equal(result.rules.length, 1);
+  assert.equal(result.rules[0].text, 'Rule inside the repo');
+});
+
+test('merges rules from both a subdirectory-nearest file and a repo-root file if both exist', () => {
+  const root = mkTmpDir();
+  fs.writeFileSync(
+    path.join(root, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Root-level rule\n<!-- /rule-guard:critical -->\n'
+  );
+  const sub = path.join(root, 'packages', 'api');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(
+    path.join(sub, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Package-level rule\n<!-- /rule-guard:critical -->\n'
+  );
+
+  const result = findAndParseRules(sub);
+  const texts = result.rules.map((r) => r.text).sort();
+  assert.deepEqual(texts, ['Package-level rule', 'Root-level rule']);
+});
+
+test('collectSearchDirs never walks past MAX_UPWARD_LEVELS even with no .git anywhere', () => {
+  // Build a directory chain deeper than MAX_UPWARD_LEVELS with no .git
+  // at all, to exercise the hard cap rather than the repo-boundary stop.
+  const root = mkTmpDir();
+  let deepest = root;
+  for (let i = 0; i < MAX_UPWARD_LEVELS + 5; i++) {
+    deepest = path.join(deepest, `level${i}`);
+  }
+  fs.mkdirSync(deepest, { recursive: true });
+
+  const dirs = collectSearchDirs(deepest);
+  assert.equal(dirs.length, MAX_UPWARD_LEVELS);
+});
+
+test('collectSearchDirs on a path at the filesystem root does not throw or loop forever', () => {
+  const fsRoot = path.parse(process.cwd()).root; // e.g. "C:\\" or "/"
+  assert.doesNotThrow(() => {
+    const dirs = collectSearchDirs(fsRoot);
+    assert.ok(dirs.length >= 1);
+  });
+});
+
+test('findRulesFile also benefits from upward traversal', () => {
+  const { findRulesFile } = require('../scripts/lib/parse-rules');
+  const root = mkTmpDir();
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), 'Plain content, no block, from repo root.\n');
+  const sub = path.join(root, 'packages', 'api');
+  fs.mkdirSync(sub, { recursive: true });
+
+  const found = findRulesFile(sub);
+  assert.ok(found);
+  assert.match(found.content, /Plain content, no block, from repo root/);
+});
+
+test('a .git worktree (file, not directory) is still recognized as a repo boundary', () => {
+  const outside = mkTmpDir();
+  fs.writeFileSync(
+    path.join(outside, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Should not be found, outside the worktree boundary\n<!-- /rule-guard:critical -->\n'
+  );
+  const worktreeRoot = path.join(outside, 'myworktree');
+  fs.mkdirSync(worktreeRoot, { recursive: true });
+  // A real git worktree's .git is a FILE containing a "gitdir:" pointer,
+  // not a directory - fs.existsSync doesn't care about the distinction,
+  // but this locks in that the code doesn't accidentally assume a
+  // directory (e.g. via fs.statSync(...).isDirectory()).
+  fs.writeFileSync(path.join(worktreeRoot, '.git'), 'gitdir: /elsewhere/.git/worktrees/myworktree\n');
+  fs.writeFileSync(
+    path.join(worktreeRoot, 'CLAUDE.md'),
+    '<!-- rule-guard:critical -->\n- Worktree rule\n<!-- /rule-guard:critical -->\n'
+  );
+  const sub = path.join(worktreeRoot, 'src');
+  fs.mkdirSync(sub);
+
+  const result = findAndParseRules(sub);
+  assert.equal(result.rules.length, 1);
+  assert.equal(result.rules[0].text, 'Worktree rule');
+});
+
+test('findAllRulesFiles collects files from multiple levels, nearest first', () => {
+  const { findAllRulesFiles } = require('../scripts/lib/parse-rules');
+  const root = mkTmpDir();
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), 'root file');
+  const sub = path.join(root, 'packages', 'api');
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(sub, 'CLAUDE.md'), 'sub file');
+
+  const all = findAllRulesFiles(sub);
+  assert.equal(all.length, 2);
+  assert.equal(all[0].content, 'sub file', 'nearest file should come first');
+  assert.equal(all[1].content, 'root file');
 });

@@ -6,7 +6,7 @@
 
 [![version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-90%2F90%20passing-brightgreen)](tests/)
+[![tests](https://img.shields.io/badge/tests-108%2F108%20passing-brightgreen)](tests/)
 [![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](docs/ARCHITECTURE_DECISION.md)
 
 </div>
@@ -60,6 +60,8 @@ By default, seatbelt re-injects the whole file when it's small, so most projects
 <!-- /rule-guard:critical -->
 ```
 
+**Monorepos work out of the box.** Running Claude Code from a subdirectory (`cd packages/api && claude`)? seatbelt walks up to your repo root to find `CLAUDE.md`, stopping at the first `.git` boundary — no config needed.
+
 ## ✨ How it Works
 
 | Trigger | Fires on | Why |
@@ -94,11 +96,23 @@ Optional. Drop a `.claude/seatbelt.json` in your project to customize behavior. 
 
 ## 🛑 Limitations: What seatbelt is *not*
 
+seatbelt used to also try blocking dangerous Bash commands. It doesn't anymore — here's the honest reason:
+
+> Two rounds of real, blind-tested detection work found recall on unfamiliar tools was unstable and ecosystem-dependent — **12% → 60% → 40%** across three independent holdout tests, even while false positives stayed at 0%. That's not a foundation to ship a safety claim on, so it was cut. The code and full four-verdict eval history are preserved on [`archive/enforcement`](https://github.com/dripston/seatbelt/tree/archive/enforcement) — nothing deleted, just not shipped. Full numbers: [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md).
+
+So, plainly:
+
 - **Does not block or check any command** — no `PreToolUse` hook, no deny, no ask.
 - **Does not detect "dangerous" content** — no opinion on command content at all.
 - **Is not a substitute for your own judgment** — a rule in context is more likely to be followed, not guaranteed to be.
 - **Does not fix `AGENTS.md` truncation** on very long files ([openai/codex#13386](https://github.com/openai/codex/issues/13386)) — that's a model-context bug.
 - **Adds a small per-invocation cost** (a bounded transcript size check per prompt, a small file read/write per session event).
+
+## 🧪 Does re-injection actually help? Here's the honest answer.
+
+Two real headless test runs measured this directly. Both came back **null results** — not because the mechanism failed, but because neither test's "seatbelt off" control arm ever showed rule decay in the first place, so there was nothing for re-injection to visibly fix. One run also caught and fixed a real shipped bug (`SessionStart`'s output had the wrong JSON shape, so it was a silent no-op) — found by tracing live hook output, not by unit tests.
+
+**This is stated plainly, not spun.** The mechanism is confirmed working end-to-end (live-traced against the real Claude Code hook contract). Whether it measurably moves adherence at depth is still an open question. Full data and reasoning: [evals/adherence/RESULTS.md](evals/adherence/RESULTS.md).
 
 ## 📖 The Problem
 
