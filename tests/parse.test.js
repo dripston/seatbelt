@@ -8,14 +8,22 @@ const path = require('path');
 
 const {
   parseBlocksFromContent,
-  findAndParseRules,
-  guardPatternToRegExp,
+  findAllRulesFiles,
   collectSearchDirs,
   MAX_UPWARD_LEVELS,
 } = require('../scripts/lib/parse-rules');
 
 function mkTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'rule-guard-test-'));
+}
+
+// Mirrors the merge pattern production code actually uses
+// (scripts/lib/select-content.js): findAllRulesFiles for raw file
+// discovery, then parseBlocksFromContent per file to extract rules.
+function findAndParseRules(cwd) {
+  const files = findAllRulesFiles(cwd);
+  const rules = files.flatMap((f) => parseBlocksFromContent(f.content));
+  return { rules, sources: files.map((f) => f.path) };
 }
 
 test('no file: findAndParseRules returns empty, does not throw', () => {
@@ -123,25 +131,6 @@ test('huge file does not throw and completes', () => {
   assert.equal(rules.length, 1);
   assert.equal(rules[0].text, 'Needle rule');
   assert.ok(elapsed < 2000, `parsing huge file took ${elapsed}ms, expected <2000ms`);
-});
-
-test('guardPatternToRegExp: wildcard matches variable content', () => {
-  const re = guardPatternToRegExp('rm * migrations/*');
-  assert.ok(re.test('rm -rf migrations/001_init.sql'));
-  assert.ok(!re.test('rm -rf src/index.js'));
-});
-
-test('guardPatternToRegExp: literal pattern with no wildcard', () => {
-  const re = guardPatternToRegExp('git push');
-  assert.ok(re.test('git push origin main'));
-  assert.ok(re.test('GIT PUSH')); // case-insensitive
-  assert.ok(!re.test('git pull'));
-});
-
-test('guardPatternToRegExp: special regex characters in pattern are escaped', () => {
-  const re = guardPatternToRegExp('rm -rf .git/*');
-  assert.ok(re.test('rm -rf .git/hooks'));
-  assert.ok(!re.test('rm -rf Xgit/hooks')); // literal dot should not match any-char
 });
 
 test('unreadable/permission-error file does not crash findAndParseRules', () => {

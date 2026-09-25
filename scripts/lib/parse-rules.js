@@ -89,13 +89,12 @@ function readFileSafe(filePath) {
 // How many parent directories to walk upward looking for a rules file,
 // so a session started in a monorepo subdirectory (e.g. `packages/api`)
 // still finds rules declared at the repo root. Reproduced directly as a
-// real, silent failure before this was added: findAndParseRules found 0
-// rules from a subdirectory even though the parent directory had a
-// valid CLAUDE.md. Capped rather than unbounded so a pathological/
-// unusual cwd (e.g. a very deep path, or one with no filesystem root
-// reachable for some reason) can't cause an unbounded loop; stops early
-// at a directory containing `.git` (the repo boundary) or the
-// filesystem root, whichever comes first.
+// real, silent failure before this was added: a subdirectory cwd found 0
+// rules even though the parent directory had a valid CLAUDE.md. Capped
+// rather than unbounded so a pathological/unusual cwd (e.g. a very deep
+// path, or one with no filesystem root reachable for some reason) can't
+// cause an unbounded loop; stops early at a directory containing `.git`
+// (the repo boundary) or the filesystem root, whichever comes first.
 const MAX_UPWARD_LEVELS = 10;
 
 /**
@@ -124,97 +123,9 @@ function collectSearchDirs(startDir) {
 }
 
 /**
- * Finds and merges critical-block rules from all candidate files under
- * cwd AND each parent directory up to a repo boundary (a directory
- * containing `.git`) or MAX_UPWARD_LEVELS, whichever comes first. This
- * is what makes rules declared at a repo root visible to a session
- * started in a subdirectory (e.g. a monorepo's packages/api). Guaranteed
- * not to throw. Returns { rules: [{text, guard}], sources: [absolutePathsFound] }
- */
-function findAndParseRules(cwd) {
-  const sources = [];
-  const rules = [];
-  const normalizedCwd = normalizeCwd(cwd);
-  try {
-    const searchDirs = collectSearchDirs(normalizedCwd);
-    for (const dir of searchDirs) {
-      for (const rel of CANDIDATE_FILES) {
-        const abs = path.join(dir, rel);
-        if (!fs.existsSync(abs)) continue;
-        const content = readFileSafe(abs);
-        const found = parseBlocksFromContent(content);
-        if (found.length > 0) {
-          sources.push(abs);
-          rules.push(...found);
-        }
-      }
-    }
-  } catch (_err) {
-    // Fail open: any unexpected error yields no rules, never a crash.
-    return { rules: [], sources: [] };
-  }
-
-  // Startup sanity check: if a CLAUDE.md/AGENTS.md exists but has no
-  // recognized critical block, or the directory couldn't be resolved at
-  // all, warn to stderr rather than silently doing nothing. A silent
-  // no-op (rules the user thinks are active but aren't) is the worst
-  // failure mode this tool can have — worse than a false positive, since
-  // a false positive is at least visible.
-  if (rules.length === 0) {
-    try {
-      const anyFileExists = CANDIDATE_FILES.some((rel) => fs.existsSync(path.join(normalizedCwd, rel)));
-      if (anyFileExists) {
-        process.stderr.write(
-          'rule-guard: found a CLAUDE.md/AGENTS.md file but no <!-- rule-guard:critical --> block was recognized in it. Rules are NOT active for this session. Check the block syntax in README.md.\n'
-        );
-      }
-    } catch (_e) {
-      // best-effort warning only; never let this throw
-    }
-  }
-
-  return { rules, sources };
-}
-
-/**
- * Converts a guard pattern like "git push" or "rm * migrations/*"
- * into a RegExp. '*' becomes a wildcard matching any characters
- * (including none); everything else is escaped literally.
- */
-function guardPatternToRegExp(pattern) {
-  const escaped = pattern
-    .split('*')
-    // Trim each segment before escaping: a pattern like "rm * migrations/*"
-    // has a leading space on " migrations/" purely to separate it from the
-    // '*' in the source text — that space is already implied by the
-    // wildcard's own '.*' (which can match zero-or-more characters,
-    // including a space or nothing at all). Without trimming, that literal
-    // leading/trailing space becomes an ADDITIONAL mandatory \s+ requirement
-    // stacked next to the wildcard, so "rm migrations/x" (no flags, just
-    // one space between "rm" and "migrations/") fails to match because the
-    // regex demands two separate whitespace gaps. This was a real,
-    // confirmed bug found in testing.
-    .map((part) => part.trim())
-    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-    // Collapse runs of literal whitespace into a class that tolerates
-    // incidental spacing variations: repeated/tab/newline whitespace
-    // ("git  push"), and a Bash backslash line-continuation ("git\" +
-    // newline + "push", where a literal backslash sits between the word
-    // and the newline). \\?\s+ matches an optional backslash followed by
-    // one or more whitespace characters.
-    .map((part) => part.replace(/\s+/g, '\\\\?\\s+'))
-    .join('.*');
-  // 's' (dotAll) flag: '.' must also match embedded newlines, otherwise a
-  // command split across lines (e.g. a backslash line-continuation)
-  // silently evades a guard pattern. This was a real, confirmed bug
-  // found in testing.
-  return new RegExp(escaped, 'is');
-}
-
-/**
  * Finds the nearest candidate rules file, searching cwd first and then
  * walking upward toward a repo boundary or MAX_UPWARD_LEVELS (same
- * traversal as findAndParseRules, so a subdirectory session still finds
+ * traversal as findAllRulesFiles, so a subdirectory session still finds
  * a root-level CLAUDE.md). Within a single directory, checks CLAUDE.md,
  * then .claude/CLAUDE.md, then AGENTS.md. Returns { path, content } for
  * the first match, or null if none exist anywhere in the search path.
@@ -268,11 +179,9 @@ function findAllRulesFiles(cwd) {
 
 module.exports = {
   parseBlocksFromContent,
-  findAndParseRules,
   findRulesFile,
   findAllRulesFiles,
   collectSearchDirs,
-  guardPatternToRegExp,
   normalizeCwd,
   CANDIDATE_FILES,
   MAX_UPWARD_LEVELS,

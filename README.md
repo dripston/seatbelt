@@ -6,7 +6,7 @@
 
 [![version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-108%2F108%20passing-brightgreen)](tests/)
+[![tests](https://img.shields.io/badge/tests-105%2F105%20passing-brightgreen)](tests/)
 [![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](#-limitations-what-seatbelt-is-not)
 
 </div>
@@ -71,6 +71,8 @@ By default, seatbelt re-injects the whole file when it's small, so most projects
 | **Depth** | `UserPromptSubmit` | A long session degrades adherence purely from context depth. seatbelt estimates transcript size and re-injects past a threshold (first at 100K tokens, then every 50K). |
 
 > 💡 **Why 100K tokens?** Measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window (roughly 100K for Claude Code's ~200K window). 100,000 sits right at the start of that zone, before the steep part of the drop-off.
+>
+> **How "tokens" are estimated:** seatbelt doesn't call an API to count real tokens — it estimates from the transcript file's raw size (~4 characters per token), which includes tool-call payloads and JSON overhead, not just conversation text. It's a threshold heuristic, not a precise token count — treat `firstFire`/`interval` as "roughly this deep," not exact.
 
 ## ⚙️ Configuration
 
@@ -107,6 +109,7 @@ So, plainly:
 - **Is not a substitute for your own judgment** — a rule in context is more likely to be followed, not guaranteed to be.
 - **Does not fix `AGENTS.md` truncation** on very long files ([openai/codex#13386](https://github.com/openai/codex/issues/13386)) — that's a model-context bug.
 - **Adds a small per-invocation cost** (a bounded transcript size check per prompt, a small file read/write per session event).
+- **The adherence benefit of re-injection is not yet confirmed by a clean measurement.** Re-injecting the text is verified and tested; whether it measurably improves rule-following at depth is not — real test runs produced a null result rather than a clear signal either way. If you need proof it changes model behavior, this isn't that yet — it's the mechanism the theory needs, tested for correctness, not for effect size.
 
 ## 📖 The Problem
 
