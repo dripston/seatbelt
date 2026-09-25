@@ -4,9 +4,9 @@
 
 **Keep your `CLAUDE.md` rules alive — across compaction, resume, and long sessions.**
 
-[![version](https://img.shields.io/badge/version-0.3.1-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.3.2-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-128%2F128%20passing-brightgreen)](tests/)
+[![tests](https://img.shields.io/badge/tests-134%2F134%20passing-brightgreen)](tests/)
 [![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](#-limitations-what-seatbelt-is-not)
 
 </div>

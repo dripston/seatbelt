@@ -102,7 +102,19 @@ async function main() {
 }
 
 if (require.main === module) {
-  main();
+  // main() is async; an uncaught rejection here (e.g. process.stdout.write
+  // throwing on EPIPE if the parent closes the pipe early) would otherwise
+  // crash the process with a non-zero exit and a stack trace on stderr —
+  // the opposite of the fail-open contract every other path in this file
+  // guarantees. Swallow and always exit 0 instead.
+  main().catch(() => {
+    try {
+      process.exit(0);
+    } catch (_err) {
+      // even process.exit can theoretically throw in a torn-down process;
+      // nothing more to do
+    }
+  });
 }
 
 module.exports = { decide };

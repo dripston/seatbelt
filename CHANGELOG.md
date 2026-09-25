@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.2 — fix: an async hook crash could exit non-zero instead of failing open
+
+Asked directly: "is there something we can't do in the CLAUDE.md ingestion pipeline" that could cause more failures. Traced every hook script's entrypoint end to end rather than just its internal logic, since that's the boundary between "seatbelt has a bug" and "seatbelt crashes ungracefully in a way Claude Code has to handle."
+
+Found: all four hook scripts (`session-start.js`, `depth-check.js`, `guard-check.js`, `session-end.js`) call an `async main()` bare at module scope with no `.catch()`. Every internal code path is defensively wrapped and every doc comment in this codebase claims "never crash, fail open" — but `process.stdout.write(...)` right before the final `process.exit(0)` sits outside all of those try/catches in every script. Reproduced directly: a throwing `stdout.write` with a bare `main();` exits the process with code 1 and a stack trace on stderr, not the clean `exit 0` every other path guarantees. This is reachable in practice via EPIPE (the parent closing the hook's stdout pipe early, e.g. on a timeout), not just a contrived edge case.
+
+- Fixed: every hook script's `main()` invocation is now `main().catch(() => process.exit(0))`, so any rejection — from anywhere in the call chain, including the previously-unguarded final write — resolves to a clean exit instead of propagating unhandled.
+- Added `tests/main-fail-open.test.js`: proves the `.catch()` wrapper pattern converts a rejection into a clean outcome, and statically checks all four real hook script files actually contain the wrapper (confirmed to fail against the pre-fix files, so it's a genuine regression guard, not a no-op).
+- Attempted to reproduce a real OS-level EPIPE through spawned child processes first, per this project's evidence-before-claim practice; Windows pipe/buffering behavior didn't reproduce it reliably enough to serve as a test, so the test instead locks in the exact code pattern that fixes the underlying defect. Noted here rather than shipped silently as if it were a full end-to-end proof.
+
 ## v0.3.1 — fix: guard-match nudge was inert on Windows without Git Bash
 
 Verified v0.3.0's new `PreToolUse` hook against a real, live `claude` invocation before calling it done (this project's own established practice — the `additionalContext` nesting bug in v0.2.0 was also only found this way). Found: on a Windows machine where Claude Code can't detect Git Bash, it logs "Git Bash not found; BashTool will be unavailable" and routes shell execution through a tool literally named `PowerShell`, not `Bash` — confirmed via a live hook-input capture. `guard-check.js`'s hook registration matched only `"Bash"`, so on any such machine the `PreToolUse` dispatcher never invoked the script at all: completely inert, silently, exactly the failure mode this project exists to prevent.

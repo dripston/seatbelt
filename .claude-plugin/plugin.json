@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "seatbelt",
   "displayName": "Seatbelt (rule-guard)",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Keeps your CLAUDE.md/AGENTS.md rules alive in Claude Code's context across compaction, resume, and long sessions, and nudges before a command matches a rule you've flagged.",
   "author": {
     "name": "dripston"

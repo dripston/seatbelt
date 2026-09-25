@@ -27,5 +27,17 @@ async function main() {
 }
 
 if (require.main === module) {
-  main();
+  // main() is async; an uncaught rejection here would otherwise crash the
+  // process with a non-zero exit and a stack trace on stderr — the
+  // opposite of the fail-open contract this hook is meant to guarantee
+  // (SessionEnd cleanup is already best-effort by design). Swallow and
+  // always exit 0 instead.
+  main().catch(() => {
+    try {
+      process.exit(0);
+    } catch (_err) {
+      // even process.exit can theoretically throw in a torn-down process;
+      // nothing more to do
+    }
+  });
 }
