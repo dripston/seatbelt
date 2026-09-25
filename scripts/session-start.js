@@ -29,8 +29,8 @@ function noOutput() {
 // prompt-injection defenses can flag hook text framed as an out-of-band
 // system command ("SYSTEM:", "you must", "IMPORTANT INSTRUCTION"), which
 // surfaces the text to the user as a warning instead of using it as
-// context. This phrasing was tested and does not trigger that warning —
-// see docs/DESIGN.md.
+// context. This phrasing was tested live and does not trigger that
+// warning.
 function formatContext(text) {
   return ['Project rules from CLAUDE.md/AGENTS.md:', '', text].join('\n');
 }

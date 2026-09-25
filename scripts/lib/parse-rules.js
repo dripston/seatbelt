@@ -15,11 +15,11 @@ const CANDIDATE_FILES = [
 // the leading slash. This form is NOT accepted as absolute by Node's
 // path.join on win32 (it gets treated as drive-relative), which silently
 // produces a wrong, usually-nonexistent path. Confirmed unreachable via
-// Claude Code's actual hook input in practice (see docs/HOOK_INPUT_EVIDENCE.md
-// — Claude Code always normalizes cwd to native Windows form before sending
-// it to hooks), but handled defensively here in case scripts are invoked
-// directly (e.g. manual testing, a different terminal, a future Claude
-// Code version) with a POSIX-style cwd.
+// Claude Code's actual hook input in practice (Claude Code always
+// normalizes cwd to native Windows form before sending it to hooks, per
+// live-captured hook input), but handled defensively here in case
+// scripts are invoked directly (e.g. manual testing, a different
+// terminal, a future Claude Code version) with a POSIX-style cwd.
 const POSIX_MOUNT_RE = /^\/([a-zA-Z])(\/.*)?$/;
 
 /**
@@ -193,7 +193,7 @@ function guardPatternToRegExp(pattern) {
     // stacked next to the wildcard, so "rm migrations/x" (no flags, just
     // one space between "rm" and "migrations/") fails to match because the
     // regex demands two separate whitespace gaps. This was a real,
-    // confirmed bug (see PROGRESS.md fix-pass Phase 3).
+    // confirmed bug found in testing.
     .map((part) => part.trim())
     .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
     // Collapse runs of literal whitespace into a class that tolerates
@@ -206,8 +206,8 @@ function guardPatternToRegExp(pattern) {
     .join('.*');
   // 's' (dotAll) flag: '.' must also match embedded newlines, otherwise a
   // command split across lines (e.g. a backslash line-continuation)
-  // silently evades a guard pattern. Fixed in the fix-pass (was a real,
-  // confirmed bug; see evals/results/VERDICT.md).
+  // silently evades a guard pattern. This was a real, confirmed bug
+  // found in testing.
   return new RegExp(escaped, 'is');
 }
 

@@ -7,7 +7,7 @@
 [![version](https://img.shields.io/badge/version-0.2.0-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![tests](https://img.shields.io/badge/tests-108%2F108%20passing-brightgreen)](tests/)
-[![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](docs/ARCHITECTURE_DECISION.md)
+[![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](#-limitations-what-seatbelt-is-not)
 
 </div>
 
@@ -70,7 +70,7 @@ By default, seatbelt re-injects the whole file when it's small, so most projects
 | **Resume** | `SessionStart`, `source: resume` | Same risk when picking a saved session back up. |
 | **Depth** | `UserPromptSubmit` | A long session degrades adherence purely from context depth. seatbelt estimates transcript size and re-injects past a threshold (first at 100K tokens, then every 50K). |
 
-> 💡 **Why 100K tokens?** Measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window. 100,000 sits right at the start of that zone. Full reasoning in [docs/DESIGN.md](docs/DESIGN.md).
+> 💡 **Why 100K tokens?** Measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window (roughly 100K for Claude Code's ~200K window). 100,000 sits right at the start of that zone, before the steep part of the drop-off.
 
 ## ⚙️ Configuration
 
@@ -98,7 +98,7 @@ Optional. Drop a `.claude/seatbelt.json` in your project to customize behavior. 
 
 seatbelt used to also try blocking dangerous Bash commands. It doesn't anymore — here's the honest reason:
 
-> Two rounds of real, blind-tested detection work found recall on unfamiliar tools was unstable and ecosystem-dependent — **12% → 60% → 40%** across three independent holdout tests, even while false positives stayed at 0%. That's not a foundation to ship a safety claim on, so it was cut. The code and full four-verdict eval history are preserved on [`archive/enforcement`](https://github.com/dripston/seatbelt/tree/archive/enforcement) — nothing deleted, just not shipped. Full numbers: [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md).
+> Two rounds of real, blind-tested detection work found recall on unfamiliar tools was unstable and ecosystem-dependent — **12% → 60% → 40%** across three independent holdout tests, even while false positives stayed at 0%. That's not a foundation to ship a safety claim on, so it was cut. The code is preserved on [`archive/enforcement`](https://github.com/dripston/seatbelt/tree/archive/enforcement) — nothing deleted, just not shipped.
 
 So, plainly:
 
@@ -112,7 +112,7 @@ So, plainly:
 
 Two real headless test runs measured this directly. Both came back **null results** — not because the mechanism failed, but because neither test's "seatbelt off" control arm ever showed rule decay in the first place, so there was nothing for re-injection to visibly fix. One run also caught and fixed a real shipped bug (`SessionStart`'s output had the wrong JSON shape, so it was a silent no-op) — found by tracing live hook output, not by unit tests.
 
-**This is stated plainly, not spun.** The mechanism is confirmed working end-to-end (live-traced against the real Claude Code hook contract). Whether it measurably moves adherence at depth is still an open question. Full data and reasoning: [evals/adherence/RESULTS.md](evals/adherence/RESULTS.md).
+**This is stated plainly, not spun.** The mechanism is confirmed working end-to-end (live-traced against the real Claude Code hook contract). Whether it measurably moves adherence at depth is still an open question.
 
 ## 📖 The Problem
 
@@ -122,8 +122,6 @@ This tool is built on a documented, still-open gap in Claude Code:
 - [anthropics/claude-code#88565](https://github.com/anthropics/claude-code/issues/88565) — auto mode routes edits through Bash, bypassing rule injection.
 - [anthropics/claude-code#81999](https://github.com/anthropics/claude-code/issues/81999) — agent breaks an explicit "every time, no exceptions" rule after a few cycles.
 - [anthropics/claude-code#34197](https://github.com/anthropics/claude-code/issues/34197), [#43716](https://github.com/anthropics/claude-code/issues/43716) — CLAUDE.md ignored in long sessions.
-
-*(Full log: [docs/EVIDENCE.md](docs/EVIDENCE.md))*
 
 ## 🔍 Prior Art
 

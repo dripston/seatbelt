@@ -201,8 +201,8 @@ test('mixed bullet styles in critical block all parse correctly', () => {
 // started in a monorepo subdirectory (e.g. `packages/api`) found ZERO
 // rules even when a valid CLAUDE.md existed at the repo root, because
 // findAndParseRules/findRulesFile/findAllRulesFiles only ever checked
-// `cwd` itself. Confirmed reachable in practice via docs/HOOK_INPUT_EVIDENCE.md
-// (Claude Code's `cwd` does track a Bash `cd` into a subdirectory).
+// `cwd` itself. Confirmed reachable in practice via live-captured hook
+// input (Claude Code's `cwd` does track a Bash `cd` into a subdirectory).
 
 test('findAndParseRules discovers a repo-root CLAUDE.md from a subdirectory', () => {
   const root = mkTmpDir();

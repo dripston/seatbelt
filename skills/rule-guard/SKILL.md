@@ -7,7 +7,7 @@ description: Use when the user wants to keep project rules alive in an agent's c
 
 Claude Code agents drop project rules mid-session — after context compaction, on resume, or just from being deep in a long session. This is a documented, unresolved gap (see anthropics/claude-code issues #92257, #88565, #81999, #34197, #43716). Pure instructions decay because the model can quote a rule accurately and still act against it — quoting proves the rule loaded, not that it's still governing behavior.
 
-This skill's plugin (seatbelt) mitigates this with re-injection, not enforcement: it keeps the user's own rules present in context, on three triggers — compaction, resume, and context depth. It does not block or check any command. (An earlier version also tried command-level blocking; two rounds of testing found that detector's recall on unfamiliar tools was unstable and ecosystem-dependent, so it was cut. See docs/ARCHITECTURE_DECISION.md if asked about it — the code is preserved on the `archive/enforcement` branch, not deleted.)
+This skill's plugin (seatbelt) mitigates this with re-injection, not enforcement: it keeps the user's own rules present in context, on three triggers — compaction, resume, and context depth. It does not block or check any command. (An earlier version also tried command-level blocking; two rounds of testing found that detector's recall on unfamiliar tools was unstable and ecosystem-dependent, so it was cut. The code is preserved on the `archive/enforcement` branch, not deleted, if asked about it.)
 
 ## Helping the user write rules
 
@@ -28,6 +28,7 @@ When a user asks you to set this up:
 2. Write them as plain bullet points in whichever file the project already uses (don't create a second rules file if one exists).
 3. Only add the `<!-- rule-guard:critical -->` marker if the file is large and the user wants re-injection scoped to specific lines rather than the whole file.
 4. If the user wants different depth thresholds or injection modes than the defaults, help them write a `.claude/seatbelt.json` — see README.md's Configuration section for the fields (`firstFire`, `interval`, `mode`, `maxInjectTokens`, `minTurnsBetween`).
+5. In a monorepo, the rules file (and `.claude/seatbelt.json`) can live at the repo root even if the user works from a subdirectory — seatbelt walks upward to find it, stopping at the repo's `.git` boundary. No special setup needed.
 
 ## The three triggers, briefly
 
@@ -42,4 +43,4 @@ Be upfront about these limits if asked, rather than implying the plugin is more 
 - It does not detect or judge what's "dangerous" — it has no opinion on command content at all.
 - A rule present in context is a rule the model is more likely to follow, not a guarantee.
 - It cannot fix AGENTS.md truncation on very long files — that's a separate, model-context-level bug.
-- The adherence benefit of re-injection itself is not yet confirmed by a clean measurement — an honest, real test run found a null result and surfaced infrastructure bugs rather than a clear signal either way. See evals/adherence/RESULTS.md if asked how well this actually works.
+- The adherence benefit of re-injection itself is not yet confirmed by a clean measurement — real test runs found a null result and surfaced infrastructure bugs rather than a clear signal either way. Say this plainly if asked how well it actually works, rather than overstating it.

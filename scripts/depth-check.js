@@ -26,7 +26,7 @@ function noOutput() {
 // Plain project information, matching session-start.js's phrasing: not
 // framed as an out-of-band system command, so Claude Code's
 // prompt-injection defenses don't flag it and surface it to the user as
-// a warning instead of using it as context. See docs/DESIGN.md.
+// a warning instead of using it as context.
 function formatContext(text) {
   return ['Project rules from CLAUDE.md/AGENTS.md:', '', text].join('\n');
 }
