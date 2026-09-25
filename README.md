@@ -108,12 +108,6 @@ So, plainly:
 - **Does not fix `AGENTS.md` truncation** on very long files ([openai/codex#13386](https://github.com/openai/codex/issues/13386)) — that's a model-context bug.
 - **Adds a small per-invocation cost** (a bounded transcript size check per prompt, a small file read/write per session event).
 
-## 🧪 Does re-injection actually help? Here's the honest answer.
-
-Two real headless test runs measured this directly. Both came back **null results** — not because the mechanism failed, but because neither test's "seatbelt off" control arm ever showed rule decay in the first place, so there was nothing for re-injection to visibly fix. One run also caught and fixed a real shipped bug (`SessionStart`'s output had the wrong JSON shape, so it was a silent no-op) — found by tracing live hook output, not by unit tests.
-
-**This is stated plainly, not spun.** The mechanism is confirmed working end-to-end (live-traced against the real Claude Code hook contract). Whether it measurably moves adherence at depth is still an open question.
-
 ## 📖 The Problem
 
 This tool is built on a documented, still-open gap in Claude Code:
