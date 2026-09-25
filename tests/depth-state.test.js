@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 
-const { readState, recordFire, recordTurnWithoutFiring, clearState, statePath } = require('../scripts/lib/depth-state');
+const { readState, recordFire, recordTurnWithoutFiring, clearState, statePath, pruneStaleSeatbeltFiles } = require('../scripts/lib/depth-state');
 
 function freshSessionId() {
   return `test-${crypto.randomBytes(8).toString('hex')}`;
@@ -90,4 +90,33 @@ test('state for different session ids is independent', () => {
   assert.equal(readState(id2).lastFiredTokens, 50000);
   clearState(id1);
   clearState(id2);
+});
+
+test('pruneStaleSeatbeltFiles removes files older than 48h, leaves fresh ones', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const staleId = freshSessionId();
+  const freshId = freshSessionId();
+
+  recordFire(staleId, 1000);
+  recordFire(freshId, 2000);
+
+  // Back-date the stale file's mtime to 49 hours ago
+  const staleFile = statePath(staleId);
+  const staleTime = new Date(Date.now() - 49 * 60 * 60 * 1000);
+  fs.utimesSync(staleFile, staleTime, staleTime);
+
+  pruneStaleSeatbeltFiles();
+
+  // Stale file should be gone
+  assert.ok(!fs.existsSync(staleFile), 'stale file should have been pruned');
+  // Fresh file should still be there
+  const freshFile = statePath(freshId);
+  assert.ok(fs.existsSync(freshFile), 'fresh file should not be pruned');
+  clearState(freshId);
+});
+
+test('pruneStaleSeatbeltFiles does not throw on an empty or missing tmpdir listing', () => {
+  assert.doesNotThrow(() => pruneStaleSeatbeltFiles());
 });

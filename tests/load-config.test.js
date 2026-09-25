@@ -89,3 +89,21 @@ test('minTurnsBetween of 0 is valid (not treated as falsy-invalid)', () => {
   const config = loadConfig(dir);
   assert.equal(config.minTurnsBetween, 0);
 });
+
+test('string numeric values are coerced to numbers', () => {
+  const dir = mkProject();
+  writeConfig(dir, JSON.stringify({ firstFire: '50000', interval: '25000', maxInjectTokens: '2000', minTurnsBetween: '5' }));
+  const config = loadConfig(dir);
+  assert.equal(config.firstFire, 50000);
+  assert.equal(config.interval, 25000);
+  assert.equal(config.maxInjectTokens, 2000);
+  assert.equal(config.minTurnsBetween, 5);
+});
+
+test('non-numeric string values for numeric fields fall back to defaults', () => {
+  const dir = mkProject();
+  writeConfig(dir, JSON.stringify({ firstFire: 'lots', interval: 'many' }));
+  const config = loadConfig(dir);
+  assert.equal(config.firstFire, DEFAULTS.firstFire);
+  assert.equal(config.interval, DEFAULTS.interval);
+});

@@ -100,15 +100,18 @@ test('auto mode: large file with a block falls back to the block', () => {
   assert.doesNotMatch(text, /x{100}/);
 });
 
-test('auto mode: large file with no block falls back to first lines plus a truncation note', () => {
-  const lines = [];
-  for (let i = 0; i < 500; i++) lines.push(`line number ${i} of filler content to push past the token budget`);
-  const dir = mkProject(lines.join('\n'));
-  const { text, source } = selectContent(dir, 'auto', 1500);
+test('auto mode: large file with no block falls back to smart-truncated section with most rule density', () => {
+  // Build a file where rules are at the bottom, not the top
+  const headerLines = [];
+  for (let i = 0; i < 200; i++) headerLines.push(`boilerplate paragraph ${i}`);
+  const ruleLines = [];
+  for (let i = 0; i < 50; i++) ruleLines.push(`- Rule number ${i} never do the thing`);
+  const content = [...headerLines, ...ruleLines].join('\n');
+  const dir = mkProject(content);
+  const { text, source } = selectContent(dir, 'auto', 100); // tiny budget forces fallback
   assert.equal(source, 'first-lines');
-  assert.match(text, /line number 0 of filler/);
-  assert.match(text, /truncated/);
-  assert.doesNotMatch(text, /line number 499/);
+  // Smart truncation should have found the dense rule section, not the boilerplate header
+  assert.match(text, /Rule number/);
 });
 
 test('auto mode: no file at all returns nothing', () => {

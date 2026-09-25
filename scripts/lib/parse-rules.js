@@ -40,7 +40,7 @@ function normalizeCwd(cwd) {
 }
 
 const BLOCK_RE = /<!--\s*rule-guard:critical\s*-->([\s\S]*?)<!--\s*\/rule-guard:critical\s*-->/g;
-const LINE_RE = /^\s*[-*]\s+(.*)$/;
+const LINE_RE = /^\s*(?:[-*+]|\d+\.)\s+(.*)$/;
 const GUARD_TAG_RE = /\[guard:\s*(.+?)\s*\]\s*$/;
 
 /**
@@ -171,9 +171,8 @@ function guardPatternToRegExp(pattern) {
 /**
  * Finds the first candidate rules file under cwd (CLAUDE.md, then
  * .claude/CLAUDE.md, then AGENTS.md) and returns its raw content and
- * absolute path, or null if none exist. Used by content-mode selection
- * (scripts/lib/select-content.js), which needs the whole file, not just
- * the parsed critical block. Never throws.
+ * absolute path, or null if none exist. Used by auto-mode's "full" path
+ * in content-mode selection (scripts/lib/select-content.js). Never throws.
  */
 function findRulesFile(cwd) {
   const normalizedCwd = normalizeCwd(cwd);
@@ -190,10 +189,33 @@ function findRulesFile(cwd) {
   return null;
 }
 
+/**
+ * Returns ALL candidate rules files that exist under cwd, each with their
+ * raw content and absolute path. Used by block-mode and auto-mode's block
+ * fallback to merge critical rules from CLAUDE.md, .claude/CLAUDE.md, and
+ * AGENTS.md without stopping at the first file found. Never throws.
+ */
+function findAllRulesFiles(cwd) {
+  const normalizedCwd = normalizeCwd(cwd);
+  const results = [];
+  try {
+    for (const rel of CANDIDATE_FILES) {
+      const abs = path.join(normalizedCwd, rel);
+      if (!fs.existsSync(abs)) continue;
+      const content = readFileSafe(abs);
+      if (content) results.push({ path: abs, content });
+    }
+  } catch (_err) {
+    return results;
+  }
+  return results;
+}
+
 module.exports = {
   parseBlocksFromContent,
   findAndParseRules,
   findRulesFile,
+  findAllRulesFiles,
   guardPatternToRegExp,
   normalizeCwd,
   CANDIDATE_FILES,

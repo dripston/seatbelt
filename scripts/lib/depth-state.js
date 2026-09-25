@@ -13,13 +13,53 @@ function statePath(sessionId) {
   return path.join(os.tmpdir(), `seatbelt-depth-${safeId}.json`);
 }
 
+// Max age for a state file before it's considered stale (48 hours).
+// This handles the case where Claude Code is killed with Ctrl+C or crashes,
+// preventing the SessionEnd hook from firing and cleaning up the file.
+const STALE_AFTER_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * Sweeps the OS temp directory for seatbelt state files older than
+ * STALE_AFTER_MS and removes them. Best-effort: silently ignores any
+ * errors so a restrictive temp-dir permission never causes a crash.
+ * Called lazily from readState() on each new session start.
+ */
+function pruneStaleSeatbeltFiles() {
+  try {
+    const tmpDir = os.tmpdir();
+    const entries = fs.readdirSync(tmpDir);
+    const now = Date.now();
+    for (const entry of entries) {
+      if (!entry.startsWith('seatbelt-depth-')) continue;
+      try {
+        const full = path.join(tmpDir, entry);
+        const stat = fs.statSync(full);
+        if (now - stat.mtimeMs > STALE_AFTER_MS) {
+          fs.unlinkSync(full);
+        }
+      } catch (_e) {
+        // best-effort: skip unreadable/already-deleted entries
+      }
+    }
+  } catch (_err) {
+    // best-effort only; a restrictive tmpdir never causes a crash
+  }
+}
+
 /**
  * Reads { lastFiredTokens, turnsSinceLastFire } for a session. Returns
  * { lastFiredTokens: 0, turnsSinceLastFire: Infinity } if no state exists
  * yet or the file is unreadable/corrupt (Infinity so a fresh/missing
  * state never blocks a first fire on the turn-floor check).
+ *
+ * Also lazily prunes stale state files left behind by crashed/killed
+ * sessions (e.g. Ctrl+C preventing the SessionEnd hook from firing).
  */
 function readState(sessionId) {
+  // Prune stale orphan files from previous crashed sessions. Called here
+  // rather than at module load time so it only runs when seatbelt is
+  // actually active for a session, not on every require().
+  pruneStaleSeatbeltFiles();
   try {
     const raw = fs.readFileSync(statePath(sessionId), 'utf8');
     const parsed = JSON.parse(raw);
@@ -80,4 +120,4 @@ function clearState(sessionId) {
   }
 }
 
-module.exports = { readState, writeState, recordTurnWithoutFiring, recordFire, clearState, statePath };
+module.exports = { readState, writeState, recordTurnWithoutFiring, recordFire, clearState, statePath, pruneStaleSeatbeltFiles };

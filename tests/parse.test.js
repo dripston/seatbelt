@@ -151,3 +151,44 @@ test('unreadable/permission-error file does not crash findAndParseRules', () => 
     assert.deepEqual(result.rules, []);
   });
 });
+
+test('numbered list items (1. 2.) in critical block are parsed', () => {
+  const content = [
+    '<!-- rule-guard:critical -->',
+    '1. Never git push without asking me first.',
+    '2. Always run tests before committing.',
+    '<!-- /rule-guard:critical -->',
+  ].join('\n');
+  const rules = parseBlocksFromContent(content);
+  assert.equal(rules.length, 2);
+  assert.equal(rules[0].text, 'Never git push without asking me first.');
+  assert.equal(rules[1].text, 'Always run tests before committing.');
+});
+
+test('+ bullet items in critical block are parsed', () => {
+  const content = [
+    '<!-- rule-guard:critical -->',
+    '+ Never delete the database.',
+    '+ Always ask before deploying.',
+    '<!-- /rule-guard:critical -->',
+  ].join('\n');
+  const rules = parseBlocksFromContent(content);
+  assert.equal(rules.length, 2);
+  assert.equal(rules[0].text, 'Never delete the database.');
+  assert.equal(rules[1].text, 'Always ask before deploying.');
+});
+
+test('mixed bullet styles in critical block all parse correctly', () => {
+  const content = [
+    '<!-- rule-guard:critical -->',
+    '- Dash rule',
+    '* Star rule',
+    '+ Plus rule',
+    '1. Numbered rule',
+    '<!-- /rule-guard:critical -->',
+  ].join('\n');
+  const rules = parseBlocksFromContent(content);
+  assert.equal(rules.length, 4);
+  const texts = rules.map((r) => r.text);
+  assert.deepEqual(texts, ['Dash rule', 'Star rule', 'Plus rule', 'Numbered rule']);
+});
