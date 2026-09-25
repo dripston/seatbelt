@@ -18,17 +18,35 @@ function statePath(sessionId) {
 // preventing the SessionEnd hook from firing and cleaning up the file.
 const STALE_AFTER_MS = 48 * 60 * 60 * 1000;
 
+// Minimum gap between prune sweeps, tracked in-process. readState() runs on
+// every UserPromptSubmit (every single prompt, not once per session), and a
+// full tmpdir readdirSync+statSync sweep on every prompt is real, needless
+// per-invocation overhead on a busy shared temp dir. This throttles the
+// sweep to once per process lifetime interval rather than once per prompt.
+// A fresh process (a new hook invocation) always re-checks, since Node
+// module state doesn't persist between separate `node depth-check.js`
+// invocations — so this mainly protects a single long session with many
+// prompts sharing one process, and is cheap insurance either way.
+const PRUNE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+let lastPruneAt = 0;
+
 /**
  * Sweeps the OS temp directory for seatbelt state files older than
  * STALE_AFTER_MS and removes them. Best-effort: silently ignores any
  * errors so a restrictive temp-dir permission never causes a crash.
- * Called lazily from readState() on each new session start.
+ * Throttled to at most once per PRUNE_INTERVAL_MS per process, since
+ * readState() calls this on every UserPromptSubmit — pass { force: true }
+ * to bypass the throttle (used by tests, which need a deterministic
+ * sweep regardless of what other tests already triggered).
  */
-function pruneStaleSeatbeltFiles() {
+function pruneStaleSeatbeltFiles(options) {
+  const force = options && options.force;
+  const now = Date.now();
+  if (!force && now - lastPruneAt < PRUNE_INTERVAL_MS) return;
+  lastPruneAt = now;
   try {
     const tmpDir = os.tmpdir();
     const entries = fs.readdirSync(tmpDir);
-    const now = Date.now();
     for (const entry of entries) {
       if (!entry.startsWith('seatbelt-depth-')) continue;
       try {

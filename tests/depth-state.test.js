@@ -107,7 +107,7 @@ test('pruneStaleSeatbeltFiles removes files older than 48h, leaves fresh ones', 
   const staleTime = new Date(Date.now() - 49 * 60 * 60 * 1000);
   fs.utimesSync(staleFile, staleTime, staleTime);
 
-  pruneStaleSeatbeltFiles();
+  pruneStaleSeatbeltFiles({ force: true });
 
   // Stale file should be gone
   assert.ok(!fs.existsSync(staleFile), 'stale file should have been pruned');
@@ -119,4 +119,33 @@ test('pruneStaleSeatbeltFiles removes files older than 48h, leaves fresh ones', 
 
 test('pruneStaleSeatbeltFiles does not throw on an empty or missing tmpdir listing', () => {
   assert.doesNotThrow(() => pruneStaleSeatbeltFiles());
+});
+
+test('readState throttles the prune sweep instead of scanning tmpdir on every call', () => {
+  const fs = require('fs');
+  const staleId = freshSessionId();
+  recordFire(staleId, 1000);
+  const staleFile = statePath(staleId);
+  const staleTime = new Date(Date.now() - 49 * 60 * 60 * 1000);
+  fs.utimesSync(staleFile, staleTime, staleTime);
+
+  // Force one sweep so the throttle window starts now, then immediately
+  // create another stale file and call readState (which triggers an
+  // un-forced prune internally) many times in a tight loop, simulating
+  // many prompts in one session. If readState swept every time, this
+  // loop would be doing a full tmpdir scan per call — instead only the
+  // first (already-forced) sweep should have run, so the second stale
+  // file must survive until the throttle window elapses.
+  pruneStaleSeatbeltFiles({ force: true });
+  const staleId2 = freshSessionId();
+  recordFire(staleId2, 1000);
+  const staleFile2 = statePath(staleId2);
+  fs.utimesSync(staleFile2, staleTime, staleTime);
+
+  for (let i = 0; i < 20; i++) {
+    readState(staleId2);
+  }
+
+  assert.ok(fs.existsSync(staleFile2), 'throttled readState should not have re-swept tmpdir on every call');
+  clearState(staleId2);
 });
