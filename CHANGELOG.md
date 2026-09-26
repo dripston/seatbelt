@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.3 — fix: a wildcard-only guard pattern silently matched every command
+
+Asked directly to audit the repo for flaws, without waiting for a specific bug to be pointed at first. Went looking at `guardPatternToRegExp` and `findGuardedRules` since they're the newest, least-scrutinized code.
+
+Found: a guard pattern made of only `*` and/or whitespace — e.g. `[guard: *]`, `[guard: **]` — is valid per the documented pattern syntax (`*` matches any characters, including none) and compiles to a regex equivalent to `/.*/is`, which matches every possible command unconditionally. A user writing this (plausibly by mistake — e.g. trying to "guard anything risky" without realizing a bare wildcard means "match everything") would silently turn "nudge on this one command" into "nudge on every single command, forever," with no warning that anything was wrong.
+
+- Fixed: `findGuardedRules` now detects a guard pattern with no literal content left after stripping `*` and whitespace, drops it, and warns on stderr naming the offending rule — matching this codebase's existing pattern of warning rather than silently misbehaving (see `load-config.js`'s string-coercion warning).
+- Added tests locking in both the detection logic and the real end-to-end behavior (a bare `[guard: *]` no longer nudges on an unrelated command).
+- README/SKILL.md updated to document this explicitly, including telling the agent never to suggest a wildcard-only pattern to a user.
+
+Also checked and ruled out as non-issues during this pass: guard patterns using forward slashes not matching backslash paths on native Windows shells (a real but narrow, already-documented raw-string-matching tradeoff, not a new bug); repeated identical guard nudges on retried commands (matches Claude Code's own native permission-prompt behavior, not a seatbelt defect); malformed/unclosed HTML comments surviving into `'full'`-mode re-injected content (expected verbatim-injection behavior, not a parsing bug, since `'full'` mode doesn't parse).
+
 ## v0.3.2 — fix: an async hook crash could exit non-zero instead of failing open
 
 Asked directly: "is there something we can't do in the CLAUDE.md ingestion pipeline" that could cause more failures. Traced every hook script's entrypoint end to end rather than just its internal logic, since that's the boundary between "seatbelt has a bug" and "seatbelt crashes ungracefully in a way Claude Code has to handle."

@@ -4,9 +4,9 @@
 
 **Keep your `CLAUDE.md` rules alive — across compaction, resume, and long sessions.**
 
-[![version](https://img.shields.io/badge/version-0.3.2-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.3.3-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-134%2F134%20passing-brightgreen)](tests/)
+[![tests](https://img.shields.io/badge/tests-138%2F138%20passing-brightgreen)](tests/)
 [![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](#-limitations-what-seatbelt-is-not)
 
 </div>
@@ -70,7 +70,7 @@ Want a specific rule to also trigger a heads-up right before a matching command 
 <!-- /rule-guard:critical -->
 ```
 
-`*` is a wildcard. `[guard: rm * migrations/*]` matches any `rm` command touching `migrations/`. This is a literal/wildcard string match against the pattern you wrote — not a classifier, and not required. Unguarded rules never trigger a nudge; they're only ever re-injected.
+`*` is a wildcard. `[guard: rm * migrations/*]` matches any `rm` command touching `migrations/`. This is a literal/wildcard string match against the pattern you wrote — not a classifier, and not required. Unguarded rules never trigger a nudge; they're only ever re-injected. A pattern that's only wildcards (`[guard: *]`) has no literal content to match against and would fire on every command — seatbelt detects this and ignores it (with a stderr warning) rather than nudging on everything you run.
 
 **Monorepos work out of the box.** Running Claude Code from a subdirectory (`cd packages/api && claude`)? seatbelt walks up to your repo root to find `CLAUDE.md`, stopping at the first `.git` boundary — no config needed.
 

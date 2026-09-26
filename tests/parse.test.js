@@ -11,6 +11,7 @@ const {
   findAllRulesFiles,
   findGuardedRules,
   guardPatternToRegExp,
+  isDegenerateGuardPattern,
   collectSearchDirs,
   MAX_UPWARD_LEVELS,
 } = require('../scripts/lib/parse-rules');
@@ -397,4 +398,42 @@ test('findGuardedRules returns empty array (not throw) when no files exist', () 
     const guarded = findGuardedRules(dir);
     assert.deepEqual(guarded, []);
   });
+});
+
+// --- Degenerate guard patterns: a bare "*" (or similar) matches EVERY
+// command, silently turning "nudge on this one thing" into "nudge on
+// literally everything, forever." Confirmed directly: guardPatternToRegExp
+// compiles "*" to /.*/, which matches any string including "". This is a
+// real, plausible user mistake (writing a wildcard-only pattern thinking
+// it scopes to "anything risky"), not a contrived edge case, so
+// findGuardedRules filters these out rather than letting them through.
+
+test('isDegenerateGuardPattern: bare wildcard and whitespace-only patterns are degenerate', () => {
+  assert.equal(isDegenerateGuardPattern('*'), true);
+  assert.equal(isDegenerateGuardPattern('**'), true);
+  assert.equal(isDegenerateGuardPattern('  '), true);
+  assert.equal(isDegenerateGuardPattern(' * '), true);
+  assert.equal(isDegenerateGuardPattern(''), true);
+});
+
+test('isDegenerateGuardPattern: a pattern with any literal content is not degenerate', () => {
+  assert.equal(isDegenerateGuardPattern('git push'), false);
+  assert.equal(isDegenerateGuardPattern('rm * migrations/*'), false);
+  assert.equal(isDegenerateGuardPattern('*.sql'), false);
+});
+
+test('findGuardedRules excludes a degenerate guard pattern instead of matching every command', () => {
+  const dir = mkTmpDir();
+  fs.writeFileSync(
+    path.join(dir, 'CLAUDE.md'),
+    [
+      '<!-- rule-guard:critical -->',
+      '- Meant to guard everything risky. [guard: *]',
+      '- A real, specific guard. [guard: git push]',
+      '<!-- /rule-guard:critical -->',
+    ].join('\n')
+  );
+  const guarded = findGuardedRules(dir);
+  assert.equal(guarded.length, 1, 'the degenerate "*" pattern must not pass through');
+  assert.equal(guarded[0].text, 'A real, specific guard.');
 });

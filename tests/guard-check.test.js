@@ -39,6 +39,12 @@ test('unguarded rule (no [guard: ...] tag) is never matched, even if the text ov
   assert.equal(rule, null, 'plain rules must never trigger a nudge, only explicitly guarded ones');
 });
 
+test('a degenerate "*" guard pattern does not nudge on an unrelated command', () => {
+  const dir = mkProject('- Meant to guard everything risky. [guard: *]');
+  const rule = decide('ls -la', dir);
+  assert.equal(rule, null, 'a bare wildcard pattern must be filtered out, not match every command');
+});
+
 test('wildcard guard pattern matches variable content', () => {
   const dir = mkProject('- Never touch migrations. [guard: rm * migrations/*]');
   const rule = decide('rm -rf migrations/001_init.sql', dir);

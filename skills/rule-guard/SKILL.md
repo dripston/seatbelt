@@ -31,7 +31,7 @@ A rule can also get a guard pattern, which enables the separate nudge trigger (n
 <!-- /rule-guard:critical -->
 ```
 
-`*` is a wildcard (`[guard: rm * migrations/*]` matches any `rm` touching `migrations/`). Only suggest this when the user wants a specific, nameable command pattern actively flagged the moment it's about to run — not for vague/subjective rules ("be careful with prod"), since guard matching is literal/wildcard string matching, not judgment. A rule with no guard tag is still re-injected normally; it just never triggers a nudge.
+`*` is a wildcard (`[guard: rm * migrations/*]` matches any `rm` touching `migrations/`). Only suggest this when the user wants a specific, nameable command pattern actively flagged the moment it's about to run — not for vague/subjective rules ("be careful with prod"), since guard matching is literal/wildcard string matching, not judgment. A rule with no guard tag is still re-injected normally; it just never triggers a nudge. Never suggest a wildcard-only pattern like `[guard: *]` — it has no literal content to anchor on and would match every command; seatbelt silently drops patterns like this rather than nudging on everything.
 
 When a user asks you to set this up:
 1. Ask what rules they most want to survive a long session or a compaction event.

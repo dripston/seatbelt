@@ -215,18 +215,46 @@ function guardPatternToRegExp(pattern) {
   return new RegExp(escaped, 'is');
 }
 
+// A guard pattern made of only '*' and/or whitespace (e.g. "*", "**", "  ")
+// has zero literal characters left after removing wildcards — it compiles
+// in guardPatternToRegExp to something equivalent to /.*/ , which matches
+// EVERY possible command unconditionally. Confirmed directly: [guard: *]
+// is valid per the documented pattern syntax ('*' matches any characters,
+// including none) and produces exactly this. That silently turns "nudge
+// on this specific command" into "nudge on literally every command,
+// forever," which is a real, plausible user mistake (e.g. someone writing
+// "match anything risky" without realizing '*' alone means "match
+// everything"), not a contrived edge case.
+function isDegenerateGuardPattern(pattern) {
+  return typeof pattern === 'string' && pattern.replace(/[*\s]/g, '').length === 0;
+}
+
 /**
  * Finds all guarded rules ({text, guard}) visible from cwd, merged across
  * every candidate file found by findAllRulesFiles (cwd plus parent
  * directories up to a repo boundary). Rules with no [guard: ...] tag are
  * excluded — this is the only entry point guard-check.js uses, so a plain
- * unguarded rule can never trigger a match. Never throws.
+ * unguarded rule can never trigger a match. A guard pattern with no
+ * literal content (see isDegenerateGuardPattern) is also excluded and
+ * warned about on stderr, rather than silently matching every command.
+ * Never throws.
  */
 function findGuardedRules(cwd) {
   try {
     const files = findAllRulesFiles(cwd);
     const rules = files.flatMap((f) => parseBlocksFromContent(f.content));
-    return rules.filter((r) => r.guard);
+    return rules.filter((r) => {
+      if (!r.guard) return false;
+      if (isDegenerateGuardPattern(r.guard)) {
+        try {
+          process.stderr.write(
+            `seatbelt: guard pattern "${r.guard}" on rule "${r.text}" has no literal content and would match every command — ignoring it. Use a specific pattern like "git push" or "rm * migrations/*".\n`
+          );
+        } catch (_ignored) {}
+        return false;
+      }
+      return true;
+    });
   } catch (_err) {
     return [];
   }
@@ -238,6 +266,7 @@ module.exports = {
   findAllRulesFiles,
   findGuardedRules,
   guardPatternToRegExp,
+  isDegenerateGuardPattern,
   collectSearchDirs,
   normalizeCwd,
   CANDIDATE_FILES,
