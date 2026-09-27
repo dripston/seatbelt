@@ -4,7 +4,7 @@
 
 **Keep your `CLAUDE.md` rules alive — across compaction, resume, and long sessions.**
 
-[![version](https://img.shields.io/badge/version-0.3.3-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.4.0-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![tests](https://img.shields.io/badge/tests-138%2F138%20passing-brightgreen)](tests/)
 [![scope](https://img.shields.io/badge/scope-reminder%2C%20not%20enforcer-orange)](#-limitations-what-seatbelt-is-not)
@@ -81,6 +81,7 @@ Want a specific rule to also trigger a heads-up right before a matching command 
 | **Compaction** | `SessionStart`, `source: compact` | Claude Code's own summarization can drop rules from the compacted context. |
 | **Resume** | `SessionStart`, `source: resume` | Same risk when picking a saved session back up. |
 | **Depth** | `UserPromptSubmit` | A long session degrades adherence purely from context depth. seatbelt estimates transcript size and re-injects past a threshold (first at 100K tokens, then every 50K). |
+| **Visible confirmation** | `systemMessage` on compaction/resume/depth fires | seatbelt prints a one-line "reminded the agent of your rules" message alongside the silent context injection, so you're not just trusting it happened. **VS Code caveat:** Claude Code's VS Code extension does not render a `SessionStart` hook's `systemMessage` in the chat panel — this was a filed feature request ([anthropics/claude-code#15344](https://github.com/anthropics/claude-code/issues/15344)), closed as "not planned." It shows up in the plain CLI. The guard-match nudge is unaffected either way; it was already visible via the native permission-ask UI in both environments. |
 | **Guard match** | `PreToolUse` (shell commands) | Addresses a different failure mode: the model can have a rule in context and still act against it. If a shell command matches a `[guard: pattern]` you wrote, seatbelt surfaces a plain heads-up (`permissionDecision: "ask"`) naming the rule — never a block. Fires for both Claude Code's `Bash` tool and its Windows `PowerShell` fallback (used when Git Bash isn't detected). Only fires for rules you explicitly tagged; unguarded rules are unaffected. |
 
 > 💡 **Why 100K tokens?** Measured adherence degradation starts around 50K–100K tokens and worsens sharply near 50% of the context window (roughly 100K for Claude Code's ~200K window). 100,000 sits right at the start of that zone, before the steep part of the drop-off.

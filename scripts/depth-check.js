@@ -92,6 +92,7 @@ async function main() {
   recordFire(sessionId, estimatedTokens);
 
   const output = {
+    systemMessage: 'seatbelt: reminded the agent of your CLAUDE.md/AGENTS.md rules (context depth trigger).',
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext: context,

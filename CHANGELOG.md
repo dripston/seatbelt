@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.0 — add visible confirmation via systemMessage
+
+User directly asked whether any of seatbelt's reminder triggers show up anywhere in the UI, since all the testing so far only proved the mechanism worked by reading `--debug hooks` traces — nothing was visible on screen. Checked live: confirmed via a real compact/resume/depth test that nothing appears in plain CLI output for the compaction, resume, or depth triggers today; only the guard-match nudge is visible (via Claude Code's native permission-ask UI).
+
+- Added: `session-start.js` and `depth-check.js` now also emit a top-level `systemMessage` field ("seatbelt: reminded the agent of your CLAUDE.md/AGENTS.md rules...") alongside the existing silent `additionalContext` injection, so a fire is now visible, not just inferable.
+- Verified via web search (not assumed) that `systemMessage` is a real, documented Claude Code hook output field for `SessionStart`/`UserPromptSubmit`, separate from `hookSpecificOutput`.
+- **Caveat found and documented rather than hidden:** Claude Code's VS Code extension does not render a `SessionStart` hook's `systemMessage` in the chat panel. This was filed as a feature request ([anthropics/claude-code#15344](https://github.com/anthropics/claude-code/issues/15344)) and closed "not planned" — not a bug that's expected to be fixed. It does render in the plain CLI. README updated with this caveat rather than letting VS Code users think the feature is broken.
+- Tests updated to assert the new `systemMessage` field is present on both hooks' end-to-end output.
+- Guard-match nudging (`guard-check.js`) is unchanged — it was already visible via the native permission-ask UI in both CLI and VS Code.
+
 ## v0.3.3 — fix: a wildcard-only guard pattern silently matched every command
 
 Asked directly to audit the repo for flaws, without waiting for a specific bug to be pointed at first. Went looking at `guardPatternToRegExp` and `findGuardedRules` since they're the newest, least-scrutinized code.

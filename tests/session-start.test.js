@@ -86,6 +86,7 @@ test('end-to-end: emitted JSON nests additionalContext under hookSpecificOutput 
   const output = JSON.parse(result.stdout);
   assert.equal(output.hookSpecificOutput.hookEventName, 'SessionStart');
   assert.match(output.hookSpecificOutput.additionalContext, /Never git push without asking/);
+  assert.match(output.systemMessage, /seatbelt/);
   // The bug this guards against: additionalContext at the top level
   // instead of nested. Assert it is NOT there.
   assert.equal(output.additionalContext, undefined);

@@ -120,6 +120,7 @@ test('end-to-end: emitted JSON nests additionalContext under hookSpecificOutput'
   const output = JSON.parse(result.stdout);
   assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
   assert.match(output.hookSpecificOutput.additionalContext, /Never git push without asking/);
+  assert.match(output.systemMessage, /seatbelt/);
   assert.equal(output.additionalContext, undefined);
   clearState(sessionId);
 });

@@ -73,6 +73,7 @@ async function main() {
   if (!context) return noOutput();
 
   const output = {
+    systemMessage: 'seatbelt: reminded the agent of your CLAUDE.md/AGENTS.md rules.',
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
       additionalContext: context,
