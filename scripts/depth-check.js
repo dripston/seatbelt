@@ -28,7 +28,13 @@ function noOutput() {
 // prompt-injection defenses don't flag it and surface it to the user as
 // a warning instead of using it as context.
 function formatContext(text) {
-  return ['Project rules from CLAUDE.md/AGENTS.md:', '', text].join('\n');
+  return [
+    'Project rules from CLAUDE.md/AGENTS.md:',
+    '',
+    text,
+    '',
+    '(This context was just re-injected by the seatbelt plugin, not read fresh by you.)',
+  ].join('\n');
 }
 
 /**

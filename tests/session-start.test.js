@@ -5,11 +5,17 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const { buildContext } = require('../scripts/session-start');
+const { statePath, writeState } = require('../scripts/lib/depth-state');
 
 const SCRIPT = path.join(__dirname, '..', 'scripts', 'session-start.js');
+
+function freshSessionId() {
+  return `test-session-start-${crypto.randomBytes(8).toString('hex')}`;
+}
 
 function mkProjectWithCritical(blockBody) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rule-guard-session-'));
@@ -90,6 +96,44 @@ test('end-to-end: emitted JSON nests additionalContext under hookSpecificOutput 
   // The bug this guards against: additionalContext at the top level
   // instead of nested. Assert it is NOT there.
   assert.equal(output.additionalContext, undefined);
+});
+
+// A compaction's own summary is a large synthetic message written into
+// the transcript file depth-check.js measures by byte size, so the depth
+// trigger's estimate stays inflated by that single summary right after a
+// compact just relieved the model's real context load. Confirmed live:
+// a two-message test session still measured ~118K estimated tokens
+// purely from a ~190KB compaction summary, firing an extra depth-trigger
+// re-injection on the very next prompt. session-start.js resets the
+// session's depth-state on source=compact so that stale estimate can't
+// cause a misleading double-fire.
+test('source=compact clears any existing depth-state for that session', () => {
+  const dir = mkProjectWithCritical('- Never git push without asking.');
+  const sessionId = freshSessionId();
+  writeState(sessionId, { lastFiredTokens: 118521, turnsSinceLastFire: 1 });
+  assert.ok(fs.existsSync(statePath(sessionId)), 'precondition: state file exists before compact');
+
+  const result = spawnSync('node', [SCRIPT], {
+    input: JSON.stringify({ source: 'compact', cwd: dir, session_id: sessionId }),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0);
+  assert.ok(!fs.existsSync(statePath(sessionId)), 'depth-state file should be cleared after a compact');
+});
+
+test('source=resume does NOT clear depth-state (only compact\'s inflated summary needs this reset)', () => {
+  const dir = mkProjectWithCritical('- Never git push without asking.');
+  const sessionId = freshSessionId();
+  writeState(sessionId, { lastFiredTokens: 118521, turnsSinceLastFire: 1 });
+
+  const result = spawnSync('node', [SCRIPT], {
+    input: JSON.stringify({ source: 'resume', cwd: dir, session_id: sessionId }),
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0);
+  assert.ok(fs.existsSync(statePath(sessionId)), 'resume should leave existing depth-state alone');
 });
 
 test('end-to-end: source=startup emits no stdout at all', () => {

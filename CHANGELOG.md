@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.1 — fix: a compact's own summary could inflate the depth trigger and double-fire
+
+Found live while testing v0.4.0's new systemMessage output: a real test session with only two one-word messages ("hi", "hi again") and one `/compact` still showed both the compaction re-injection AND the depth-trigger re-injection firing back to back on the very next prompt — despite the session having, by eye, nowhere near 100K tokens of actual conversation.
+
+Traced it to the real cause rather than guessing: `depth-check.js` estimates depth from the transcript file's raw byte size, and a compaction summary itself is a large synthesized message (~190KB in the reproduced case) that gets written back into that same transcript file. The byte-size estimate doesn't distinguish "a compaction just relieved the model's real context load" from "the model is 100K+ tokens deep in unaddressed conversation" — so right after a compact, the depth trigger reads the size of the summary itself and mistakes it for accumulated depth, firing an extra, misleading re-injection.
+
+- Fixed: `session-start.js` now clears the session's depth-state (via the existing `clearState()`, previously only called from `SessionEnd`) whenever it fires on `source: compact`. This is scoped to compact only, not resume — a resumed session's transcript wasn't just inflated by a fresh synthetic summary, so its existing depth-state is still meaningful and left alone.
+- Added tests: one confirming `source=compact` clears an existing depth-state file, one confirming `source=resume` does not (locking in the compact-only scoping). Confirmed the compact-clearing test fails against the pre-fix code via a manual patch-revert, so it's a genuine regression guard.
+
 ## v0.4.0 — add visible confirmation via systemMessage
 
 User directly asked whether any of seatbelt's reminder triggers show up anywhere in the UI, since all the testing so far only proved the mechanism worked by reading `--debug hooks` traces — nothing was visible on screen. Checked live: confirmed via a real compact/resume/depth test that nothing appears in plain CLI output for the compaction, resume, or depth triggers today; only the guard-match nudge is visible (via Claude Code's native permission-ask UI).

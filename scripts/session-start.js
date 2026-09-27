@@ -3,6 +3,7 @@
 
 const { selectContent } = require('./lib/select-content');
 const { loadConfig } = require('./lib/load-config');
+const { clearState } = require('./lib/depth-state');
 
 // Per DESIGN.md: only re-inject on compact/resume, not plain "startup"
 // (rules are already fresh at cold start, so injecting there would just
@@ -32,7 +33,13 @@ function noOutput() {
 // context. This phrasing was tested live and does not trigger that
 // warning.
 function formatContext(text) {
-  return ['Project rules from CLAUDE.md/AGENTS.md:', '', text].join('\n');
+  return [
+    'Project rules from CLAUDE.md/AGENTS.md:',
+    '',
+    text,
+    '',
+    '(This context was just re-injected by the seatbelt plugin, not read fresh by you.)',
+  ].join('\n');
 }
 
 /**
@@ -68,6 +75,23 @@ async function main() {
 
   const source = input && input.source;
   const cwd = (input && input.cwd) || process.cwd();
+  const sessionId = input && input.session_id;
+
+  // A compaction's own summary is itself large (it's a synthesized
+  // message covering the whole prior conversation) and gets written back
+  // into the transcript file depth-check.js measures. Without this reset,
+  // the depth trigger's byte-size estimate stays inflated by that single
+  // summary right after a compact just relieved the model's real context
+  // load — firing an extra, misleading "still deep" re-injection on the
+  // very next prompt even in an otherwise short session. Confirmed live:
+  // a session with two one-word messages and one compact still measured
+  // ~118K estimated tokens purely from the ~190KB compaction summary.
+  // Scoped to compact only, not resume: a resumed session's transcript
+  // wasn't just inflated by a fresh synthetic summary, so its existing
+  // depth-state is still meaningful.
+  if (source === 'compact' && sessionId) {
+    clearState(sessionId);
+  }
 
   const context = buildContext(source, cwd);
   if (!context) return noOutput();
