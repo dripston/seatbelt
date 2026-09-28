@@ -90,7 +90,7 @@ async function main() {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'ask',
-      permissionDecisionReason: `Heads up — this command matches your rule: "${matched.text}"`,
+      permissionDecisionReason: `[seatbelt] Heads up — this command matches your rule: "${matched.text}"`,
     },
   };
   process.stdout.write(JSON.stringify(output));
